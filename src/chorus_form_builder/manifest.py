@@ -11,6 +11,10 @@ from chorus_form_builder.spec import FormSpec
 
 _GENERATOR_NAME = "chorus-form-builder"
 _GENERATOR_VERSION = __version__
+# Keep in sync with the inline version comment at the top of
+# src/chorus_form_builder/runtime/awdForm.js. When the shim is bumped
+# (e.g., a real-runtime bridge in C v0.2), update BOTH this constant
+# and the shim's header.
 _SHIM_VERSION = "0.1.0"
 
 

@@ -173,6 +173,16 @@ def emit(
     # ----- ship awdForm.js alongside the .csd ONLY when rules were emitted -----
     if compiled.custom_rules_js:
         shim_src = Path(__file__).resolve().parent / "runtime" / "awdForm.js"
-        (output_dir / "awdForm.js").write_bytes(shim_src.read_bytes())
+        try:
+            (output_dir / "awdForm.js").write_bytes(shim_src.read_bytes())
+        except FileNotFoundError as e:
+            # Surface a clean EmitError instead of a raw OSError. The shim
+            # ships via [tool.setuptools.package-data] in pyproject.toml;
+            # a missing file here means the install is broken.
+            raise EmitError(
+                f"awdForm.js shim missing from install at {shim_src}; "
+                f"check pyproject.toml's [tool.setuptools.package-data] "
+                f"and reinstall the package"
+            ) from e
 
     return EmitResult(csd_path=csd_path, uxb_path=uxb_path, manifest_path=manifest_path)
