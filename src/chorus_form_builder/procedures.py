@@ -85,13 +85,15 @@ class Ge:
 @dataclass(frozen=True)
 class In:
     left: FieldRef
-    right: list[Literal]
+    # tuple (not list) so frozen=True actually gives hashability — see Task 1
+    # code-review note. list[X] is unhashable even inside a frozen dataclass.
+    right: tuple[Literal, ...]
 
 
 @dataclass(frozen=True)
 class NotIn:
     left: FieldRef
-    right: list[Literal]
+    right: tuple[Literal, ...]
 
 
 @dataclass(frozen=True)
@@ -123,6 +125,11 @@ _TOKEN_PATTERNS = [
     ("NUM",        r"-?\d+(\.\d+)?"),
     ("STRING_DQ",  r'"([^"]*)"'),
     ("STRING_SQ",  r"'([^']*)'"),
+    # FIELD_REF intentionally appears BEFORE KW in the alternation. Order
+    # matters in regex alternation when patterns could overlap. They don't
+    # overlap here — field codes are uppercase ([A-Z]…) and keywords are
+    # lowercase — so the order is safe today. Don't relax FIELD_REF to mixed
+    # case without re-ordering this list.
     ("FIELD_REF",  r"[A-Z][A-Z0-9]{3}\b"),  # 4-char uppercase code, word-bounded
     ("OP",         r"==|!=|<=|>=|<|>"),
     ("LBRACK",     r"\["),
@@ -263,14 +270,14 @@ class _Parser:
             self._expect("LBRACK")
             items = self._parse_literal_list()
             self._expect("RBRACK")
-            return In(field, items)
+            return In(field, tuple(items))
         if nxt.kind == "KW" and nxt.text == "not":
             self._consume()
             self._expect("KW", "in")
             self._expect("LBRACK")
             items = self._parse_literal_list()
             self._expect("RBRACK")
-            return NotIn(field, items)
+            return NotIn(field, tuple(items))
 
         # binary op
         if nxt.kind != "OP":

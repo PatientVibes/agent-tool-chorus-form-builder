@@ -50,12 +50,12 @@ def test_parser_numeric_comparison():
 
 def test_parser_membership():
     ast = parse_rule_expr('STAT in ["A", "P"]')
-    assert ast == In(FieldRef("STAT"), [Literal("A"), Literal("P")])
+    assert ast == In(FieldRef("STAT"), (Literal("A"), Literal("P")))
 
 
 def test_parser_not_in():
     ast = parse_rule_expr('STAT not in ["A", "P"]')
-    assert ast == NotIn(FieldRef("STAT"), [Literal("A"), Literal("P")])
+    assert ast == NotIn(FieldRef("STAT"), (Literal("A"), Literal("P")))
 
 
 def test_parser_boolean_and():
@@ -124,13 +124,17 @@ def test_parser_rejects_bare_field_ref():
 
 
 def test_parser_rejects_field_to_field_comparison():
-    """`STAT == FROM` is field-to-field — out of Tier 2 scope."""
+    """`STAT == FROM` is field-to-field — out of Tier 2 scope.
+
+    Expected behaviour: parser sees FROM and tries to read it as a literal,
+    fails because field codes aren't valid literals. Assertion narrows on
+    the 'literal' substring so this catches the right error class, not just
+    any SpecValidationError.
+    """
     with pytest.raises(SpecValidationError) as exc:
         parse_rule_expr("STAT == FROM")
-    msg = str(exc.value).lower()
-    # Expected behaviour: parser sees FROM and tries to read it as a literal,
-    # fails because field codes aren't valid literals.
-    assert "literal" in msg or "expected" in msg
+    assert "literal" in str(exc.value).lower(), \
+        f"expected 'literal' in error msg, got: {exc.value}"
 
 
 def test_parser_rejects_dangling_and():
@@ -150,10 +154,13 @@ def test_parser_rejects_unknown_op():
 
 def test_parser_rejects_empty_in_list():
     """`STAT in []` is meaningless (the condition is always false) and almost
-    certainly a typo. Parser rejects it — see _parse_literal_list which
-    requires at least one literal."""
-    with pytest.raises(SpecValidationError):
+    certainly a typo. Parser rejects it — _parse_literal_list calls
+    _parse_literal unconditionally before the comma loop, so the closing
+    `]` is seen where a literal was expected."""
+    with pytest.raises(SpecValidationError) as exc:
         parse_rule_expr("STAT in []")
+    assert "literal" in str(exc.value).lower(), \
+        f"expected 'literal' in error msg, got: {exc.value}"
 
 
 # --- validate_rule: field-reference scope check ---
