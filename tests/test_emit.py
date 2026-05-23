@@ -131,10 +131,12 @@ def test_translator_combobox_with_static_values_and_no_resolved():
 
 
 def test_translator_combobox_no_domain_at_all():
-    """Combobox with neither binding nor values — produces a FormField with
-    dictionary=None. Direct FieldSpec construction is the path that hits
-    this; load_spec allows it (the schema-level validator only blocks
-    BOTH-set; see spec.py:_binding_xor_values)."""
+    """Combobox with neither binding nor values AND no length set — produces a
+    FormField with dictionary=None. The DictionaryInfo attachment only fires
+    when domain_source is non-empty OR length is set; this spec has neither.
+    Direct FieldSpec construction is the path that hits this; load_spec allows
+    it (the schema-level validator only blocks BOTH-set; see
+    spec.py:_binding_xor_values)."""
     spec_field = FieldSpec(code="STAT", label="S", control_type="combobox")
     ff = _spec_field_to_form_field(spec_field, resolved_domain=None)
     assert ff.dictionary is None
