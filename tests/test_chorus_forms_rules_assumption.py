@@ -41,19 +41,27 @@ import pytest
 
 pytest.importorskip("chorus_forms", reason="chorus_forms required for these contract tests")
 
+from lxml import etree
+
 
 def _build_minimal_form_for_rules():
-    """Hand-build a minimal CsdForm (no custom_rules field — see module docstring)."""
+    """Hand-build a minimal CsdForm (no custom_rules field — see module docstring).
+
+    Uses snake_case field names to match the sub-project A+B canary
+    (tests/test_chorus_forms_assumption.py); chorus_forms' Pydantic models
+    accept both snake_case and the camelCase aliases, but staying with
+    snake_case across both canary files makes the codebase consistent.
+    """
     from chorus_forms.csd.models import CsdForm, FormMeta, FormField
     return CsdForm(
         meta=FormMeta(
-            fileName="RULESFRM",
-            formTitle="Rules Test Form",
-            formType="user_screen",
-            numPages=1,
+            file_name="RULESFRM",
+            form_title="Rules Test Form",
+            form_type="user_screen",
+            num_pages=1,
         ),
         fields=[
-            FormField(code="STAT", label="Status", controlType="text"),
+            FormField(code="STAT", label="Status", control_type="text"),
         ],
     )
 
@@ -96,7 +104,6 @@ def test_classic_xml_chain_emits_custom_rules_element():
     """When custom_rules is set on ScreenDefinitionModel, the emitted XML
     contains a non-empty <customRules> element with the JS body."""
     from chorus_forms.core.xml_builder import build_user_screen
-    from lxml import etree
 
     screen_model = _build_screen_model_with_rules()
     envelope = build_user_screen(screen_model)
@@ -112,7 +119,6 @@ def test_classic_xml_chain_emits_include_list_with_js_file():
     """When include_list has an IncludeFile entry, the emitted XML contains
     <includeList><jsFile>awdForm.js</jsFile></includeList>."""
     from chorus_forms.core.xml_builder import build_user_screen
-    from lxml import etree
 
     screen_model = _build_screen_model_with_rules()
     envelope = build_user_screen(screen_model)
@@ -123,14 +129,19 @@ def test_classic_xml_chain_emits_include_list_with_js_file():
     assert "<jsFile>awdForm.js</jsFile>" in xml_text
 
 
-def test_uxb_chain_does_not_crash_with_basic_csd_form():
-    """UXB JSON path handles a CsdForm without custom_rules/include_list on the IR
-    (those slots are not part of CsdForm — they live on ScreenDefinitionModel).
-    Confirms no exception and returns a JSON-serializable dict.
+def test_uxb_chain_isolated_from_rules_slots():
+    """UXB chain does not see custom_rules / include_list because those slots
+    live on ScreenDefinitionModel (the Classic-XML adapter output), NOT on
+    CsdForm (the shared IR).
 
-    NOTE: CsdForm intentionally has no custom_rules or include_list fields.
-    The UXB builder receives only the CsdForm — JS injection is a Classic XML
-    concern handled at the ScreenDefinitionModel level (see module docstring).
+    Original plan intent (pre-API-correction): prove the UXB chain doesn't
+    crash when CsdForm has rules slots populated.
+    Post-correction intent (this test): prove UXB is structurally isolated —
+    it consumes a CsdForm that NEVER carries rules data, so there's no path
+    by which sub-project C's JS injection could affect UXB output. The
+    'uxb_handlers_emitted: false' manifest field in v0.1 is therefore a
+    spec-level documentation flag, not enforced by a contract test (because
+    there's no observable behavior to test against).
     """
     import json
     from chorus_forms.uxb.builder import csd_to_uxb, to_design_model
