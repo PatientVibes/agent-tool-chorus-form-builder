@@ -117,6 +117,33 @@ def test_combobox_with_binding(tmp_path):
     assert spec.fields[0].values is None
 
 
+def test_binding_method_non_get_rejected(tmp_path):
+    """v0.1 only supports GET — the Fetcher Protocol exposes a single .get()
+    method, so allowing POST/PUT/etc. through the spec would silently
+    downgrade them and let the manifest lie about what really happened.
+    Pydantic must reject non-GET at load time."""
+    p = _write(tmp_path, "form.yaml", """
+        form:
+          name: TESTFORM
+          title: T
+        openapi_defaults:
+          base_url: https://example.com/api
+        fields:
+          - code: DCMB
+            label: D
+            control_type: combobox
+            binding:
+              openapi_spec: ./x.json
+              endpoint: /codes
+              method: POST
+              values_path: $.x
+              value_field: v
+    """)
+    with pytest.raises(SpecValidationError) as exc:
+        load_spec(p)
+    assert "method" in str(exc.value).lower() or "POST" in str(exc.value)
+
+
 def test_combobox_with_both_binding_and_values_rejected(tmp_path):
     p = _write(tmp_path, "form.yaml", """
         form:

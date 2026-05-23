@@ -27,11 +27,19 @@ class DomainValueSpec(BaseModel):
 
 
 class BindingSpec(BaseModel):
-    """OpenAPI endpoint binding for a combobox field."""
+    """OpenAPI endpoint binding for a combobox field.
+
+    v0.1 scope: GET only. The Fetcher Protocol exposes a single `.get()`
+    method, so allowing other verbs here would silently downgrade them
+    to GET at fetch time (with the manifest then lying about what really
+    happened). Constraining method to "GET" makes the spec match the
+    actual behavior; non-GET support is a v0.2+ extension that needs
+    Fetcher.request(method, ...).
+    """
     model_config = ConfigDict(extra="forbid")
     openapi_spec: str  # path relative to the YAML file
     endpoint: str
-    method: str = "GET"
+    method: Literal["GET"] = "GET"
     values_path: str  # JSONPath into response
     value_field: str
     description_field: str = ""  # if empty, no description column
