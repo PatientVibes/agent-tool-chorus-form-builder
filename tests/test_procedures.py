@@ -284,11 +284,16 @@ def test_compile_rules_summary_records_each_rule():
 
 
 def test_compile_rules_deterministic():
-    """Identical inputs produce byte-identical JS output."""
-    fields = [
-        _field("STAT", control_type="combobox", values=[DomainValueSpec(value="A", description="A")]),
-        _field("MEMO", length=60, visible_when='STAT == "A"', required_when='STAT == "A"'),
-    ]
-    js1 = compile_rules(fields).custom_rules_js
-    js2 = compile_rules(fields).custom_rules_js
+    """Identical inputs produce byte-identical JS output. Uses two independently
+    built FieldSpec lists so this also rules out object-identity shortcuts —
+    purely content-driven determinism."""
+    def _make_fields():
+        return [
+            _field("STAT", control_type="combobox",
+                   values=[DomainValueSpec(value="A", description="A")]),
+            _field("MEMO", length=60,
+                   visible_when='STAT == "A"', required_when='STAT == "A"'),
+        ]
+    js1 = compile_rules(_make_fields()).custom_rules_js
+    js2 = compile_rules(_make_fields()).custom_rules_js
     assert js1 == js2

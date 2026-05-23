@@ -23,9 +23,10 @@ class is reused so callers can catch one type for all spec-shape errors.
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
-from typing import Iterable, Optional, Union
+from typing import Any, Iterable, Optional, Union
 
 from chorus_form_builder.spec import SpecValidationError
 
@@ -372,11 +373,8 @@ def validate_rule(ast: object, known_field_codes: set[str]) -> None:
 
 # --- codegen ---
 
-import json as _json
-from dataclasses import dataclass as _dataclass, field as _field
 
-
-@_dataclass(frozen=True)
+@dataclass(frozen=True)
 class CompiledRules:
     """Output of compile_rules — feeds into emit.py."""
     custom_rules_js: str
@@ -404,7 +402,7 @@ def _render_literal_js(lit: Literal) -> str:
     if isinstance(v, (int, float)):
         return repr(v)
     # string
-    return _json.dumps(v)  # handles escaping; produces double-quoted
+    return json.dumps(v)  # handles escaping; produces double-quoted
 
 
 def _render_condition(node: object, varmap: dict[str, str]) -> str:
@@ -448,25 +446,31 @@ def _render_condition(node: object, varmap: dict[str, str]) -> str:
     raise SpecValidationError(f"unsupported AST node: {type(node).__name__}")
 
 
-def _collect_rules(fields) -> list[tuple]:
-    """Return list of (field_code, kind, source, default_value) tuples in
-    declaration + kind order. Skips fields with no rules."""
-    out: list[tuple] = []
+def _collect_rules(fields) -> list[tuple[str, str, str, Any, object]]:
+    """Return list of (field_code, kind, source, default_value, ast) tuples in
+    declaration + kind order. Skips fields with no rules.
+
+    The AST is parsed once here and threaded through to downstream consumers
+    (`_referenced_field_codes` + `compile_rules`) so the rule string is not
+    re-parsed at every consumer call.
+    """
+    out: list[tuple[str, str, str, Any, object]] = []
     for f in fields:
         for kind, attr in _RULE_KINDS_AND_ATTRS:
             src = getattr(f, attr)
             if src is None:
                 continue
             dv = f.default_value if kind == "default_when" else None
-            out.append((f.code, kind, src, dv))
+            ast = parse_rule_expr(src)
+            out.append((f.code, kind, src, dv, ast))
     return out
 
 
-def _referenced_field_codes(rules: list[tuple]) -> list[str]:
-    """Unique field codes referenced in any rule, in first-seen order."""
+def _referenced_field_codes(rules: list[tuple[str, str, str, Any, object]]) -> list[str]:
+    """Unique field codes referenced in any rule, in first-seen order.
+    Consumes the cached AST from `_collect_rules` — no re-parse."""
     seen: list[str] = []
-    for (_target, _kind, src, _dv) in rules:
-        ast = parse_rule_expr(src)
+    for (_target, _kind, _src, _dv, ast) in rules:
         for ref in _walk_field_refs(ast):
             if ref.code not in seen:
                 seen.append(ref.code)
@@ -492,8 +496,7 @@ def compile_rules(fields) -> CompiledRules:
         lines.append(f'    var {varmap[code]} = awdForm.getValue("{code}");')
     lines.append("")
 
-    for (target, kind, src, default_val) in rules:
-        ast = parse_rule_expr(src)
+    for (target, kind, src, default_val, ast) in rules:
         cond = _render_condition(ast, varmap)
         lines.append(f"    // {target} {kind} {src}")
         # Wrap bare (non-parenthesised) conditions in parens so the JS ternary
@@ -525,7 +528,7 @@ def compile_rules(fields) -> CompiledRules:
     js = "\n".join(lines)
 
     summary: list[dict] = []
-    for (target, kind, src, default_val) in rules:
+    for (target, kind, src, default_val, _ast) in rules:
         entry = {"field_code": target, "kind": kind, "source": src}
         if kind == "default_when":
             entry["default_value"] = default_val
