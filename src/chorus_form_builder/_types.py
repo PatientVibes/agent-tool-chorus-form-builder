@@ -1,5 +1,8 @@
-"""Shared dataclasses used across modules — no chorus_forms imports
-to avoid pulling the heavy lazy-load chain into spec.py."""
+"""Shared dataclasses + the FormBuilderError exception base.
+
+Stays chorus_forms-free so spec.py / binding.py can import from here
+without triggering the heavy chorus_forms lazy-load chain at module
+import time."""
 from __future__ import annotations
 
 from dataclasses import dataclass

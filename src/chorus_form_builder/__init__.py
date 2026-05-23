@@ -68,6 +68,7 @@ def build_form(
 
 __all__ = [
     "build_form",
+    "DomainValue",
     "EmitResult",
     "FormBuilderError",
     "SpecValidationError",

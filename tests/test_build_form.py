@@ -129,8 +129,19 @@ def test_build_form_default_fetcher_is_httpx(tmp_path):
 
 
 def test_form_builder_error_catches_all_subclasses(tmp_path):
-    """FormBuilderError is the common base — catch one to catch all."""
-    spec_path = _write_form(tmp_path, """
+    """FormBuilderError is the common base — catch one to catch all.
+
+    Verified via issubclass for all three subclasses + via pytest.raises
+    catching each error class through the base on a triggering path.
+    """
+    # Class-level: all three subclass FormBuilderError.
+    from chorus_form_builder import BindingError, EmitError, SpecValidationError
+    assert issubclass(SpecValidationError, FormBuilderError)
+    assert issubclass(BindingError, FormBuilderError)
+    assert issubclass(EmitError, FormBuilderError)
+
+    # Runtime: a spec-error path raises something catchable as FormBuilderError.
+    bad_spec = _write_form(tmp_path, """
         form:
           name: lowercase
           title: T
@@ -138,4 +149,24 @@ def test_form_builder_error_catches_all_subclasses(tmp_path):
           - {code: TFLD, label: T, control_type: text, length: 10}
     """)
     with pytest.raises(FormBuilderError):
-        build_form(spec_path, tmp_path / "out", fetcher=NoFetchFetcher())
+        build_form(bad_spec, tmp_path / "out", fetcher=NoFetchFetcher())
+
+    # Runtime: a binding-error path also raises something catchable as FormBuilderError.
+    binding_spec = _write_form(tmp_path, """
+        form:
+          name: BNDFORM
+          title: T
+        openapi_defaults:
+          base_url: https://example.com/api
+        fields:
+          - code: DCMB
+            label: D
+            control_type: combobox
+            binding:
+              openapi_spec: ./does-not-exist.json
+              endpoint: /x
+              values_path: $.x
+              value_field: v
+    """, name="binding_form.yaml")
+    with pytest.raises(FormBuilderError):
+        build_form(binding_spec, tmp_path / "out2", fetcher=NoFetchFetcher())
