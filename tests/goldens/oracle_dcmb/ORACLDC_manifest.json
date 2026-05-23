@@ -1,0 +1,21 @@
+{
+  "generator": "chorus-form-builder",
+  "generator_version": "0.1.0",
+  "generated_at": "2026-05-23T15:10:35Z",
+  "form": {
+    "name": "ORACLDC",
+    "title": "Oracle Distribution Combo",
+    "field_count": 1
+  },
+  "bindings": [
+    {
+      "field_code": "DCMB",
+      "openapi_spec_path": "./oracle.json",
+      "endpoint": "/get_distribution_combination_codes",
+      "method": "GET",
+      "values_path": "$.codes[0].distro_combo_list",
+      "fetched_at": "2026-05-23T15:10:35Z",
+      "value_count": 4
+    }
+  ]
+}

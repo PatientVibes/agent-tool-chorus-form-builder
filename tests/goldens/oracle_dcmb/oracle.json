@@ -1,0 +1,21 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Oracle API",
+    "description": "The central API for Integrating Oracle with our various systems",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/get_distribution_combination_codes": {
+      "get": {
+        "tags": ["Oracle"],
+        "summary": "Get Distribution Combination Codes",
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    }
+  }
+}

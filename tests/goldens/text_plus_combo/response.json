@@ -1,0 +1,9 @@
+{
+  "GET https://example.com/api/codes": {
+    "items": [
+      {"code": "X1", "name": "First"},
+      {"code": "X2", "name": "Second"},
+      {"code": "X3", "name": "Third"}
+    ]
+  }
+}
