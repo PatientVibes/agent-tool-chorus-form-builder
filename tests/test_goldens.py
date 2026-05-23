@@ -27,7 +27,12 @@ _UUID_RE = re.compile(
 
 
 def _normalize_manifest(manifest: dict) -> dict:
-    """Strip dynamic fields (timestamps) for stable comparison."""
+    """Strip dynamic fields (timestamps) for stable comparison.
+
+    `generator_version` is intentionally NOT stripped — a version bump is
+    a deliberate, reviewable change and should require regenerating goldens
+    so the diff stays visible in code review.
+    """
     out = dict(manifest)
     out.pop("generated_at", None)
     for b in out.get("bindings", []):
@@ -59,7 +64,13 @@ def _normalize_uxb(uxb: dict) -> dict:
 
 def _load_canned_responses(golden_dir: Path) -> dict[tuple[str, str], Response]:
     """Build a GoldenFetcher canned-response map from a response.json in the
-    golden dir. Shape: {"GET https://url": {...response body...}}."""
+    golden dir. Shape: {"GET https://url": {...response body...}}.
+
+    Missing response.json returns an empty map — fine for static-only goldens
+    like `static_combo`. A bound-spec golden missing its response.json will
+    not silently pass: GoldenFetcher raises BindingError naming the missing
+    (method, url) key on the first lookup.
+    """
     response_file = golden_dir / "response.json"
     if not response_file.is_file():
         return {}
