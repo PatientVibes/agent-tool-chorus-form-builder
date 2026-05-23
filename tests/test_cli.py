@@ -67,7 +67,7 @@ def test_cli_spec_validation_failure_exit_1(tmp_path):
     """)
     proc = _run_cli("--spec", str(spec_path), "--output", str(tmp_path / "out"))
     assert proc.returncode == 1
-    assert "form.name" in proc.stderr or "form.name" in proc.stdout
+    assert "form.name" in proc.stderr, f"expected 'form.name' in stderr; got stderr={proc.stderr!r}, stdout={proc.stdout!r}"
 
 
 def test_cli_binding_failure_exit_2(tmp_path):
@@ -88,7 +88,7 @@ def test_cli_binding_failure_exit_2(tmp_path):
               value_field: v
     """)
     proc = _run_cli("--spec", str(spec_path), "--output", str(tmp_path / "out"), "--no-fetch")
-    # --no-fetch would also error here, but the missing-file check fires first
+    # The missing OpenAPI file check fires before any fetch attempt, so this fails with BindingError regardless of fetcher choice.
     assert proc.returncode == 2
 
 
@@ -142,3 +142,24 @@ def test_cli_help_exits_zero():
     proc = _run_cli("--help")
     assert proc.returncode == 0
     assert "chorus-form-build" in proc.stdout or "--spec" in proc.stdout
+
+
+def test_cli_verbose_prints_bindings(tmp_path):
+    """--verbose prints per-binding resolution lines before the success summary."""
+    pytest.importorskip("chorus_forms")
+    # Static-only spec — no fetcher needed, manifest has bindings: []
+    spec_path = _write_form(tmp_path, """
+        form:
+          name: VERBOSE
+          title: V
+        fields:
+          - code: STAT
+            label: S
+            control_type: combobox
+            values:
+              - {value: A, description: Active}
+    """)
+    proc = _run_cli("--spec", str(spec_path), "--output", str(tmp_path / "out"), "--no-fetch", "--verbose")
+    assert proc.returncode == 0, f"stderr: {proc.stderr}"
+    # Static-only spec: no bindings, but the success summary still prints
+    assert "VERBOSE.csd" in proc.stdout
