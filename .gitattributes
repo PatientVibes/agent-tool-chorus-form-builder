@@ -1,0 +1,9 @@
+# Golden .csd files are byte-compared in tests. Force LF so git autocrlf
+# on Windows doesn't silently convert them and break the byte comparison.
+*.csd text eol=lf
+
+# Golden JSON outputs — keep LF for cross-platform reproducibility (the
+# tests JSON-parse them so line endings don't actually matter for the
+# comparison, but consistency on disk avoids spurious diffs).
+*.uxb.json text eol=lf
+*_manifest.json text eol=lf

@@ -1,0 +1,16 @@
+form:
+  name: ORACLDC
+  title: Oracle Distribution Combo
+openapi_defaults:
+  base_url: https://oracle.example.com/api/v1
+fields:
+  - code: DCMB
+    label: "Distribution Combination"
+    control_type: combobox
+    required: true
+    binding:
+      openapi_spec: ./oracle.json
+      endpoint: /get_distribution_combination_codes
+      values_path: $.codes[0].distro_combo_list
+      value_field: value
+      description_field: description

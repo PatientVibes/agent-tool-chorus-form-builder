@@ -1,0 +1,21 @@
+{
+  "generator": "chorus-form-builder",
+  "generator_version": "0.1.0",
+  "generated_at": "2026-05-23T16:00:57Z",
+  "form": {
+    "name": "TXTCOMBO",
+    "title": "Text + Combo",
+    "field_count": 3
+  },
+  "bindings": [
+    {
+      "field_code": "DCMB",
+      "openapi_spec_path": "./oracle.json",
+      "endpoint": "/codes",
+      "method": "GET",
+      "values_path": "$.items[*]",
+      "fetched_at": "2026-05-23T16:00:57Z",
+      "value_count": 3
+    }
+  ]
+}

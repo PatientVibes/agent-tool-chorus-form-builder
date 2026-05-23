@@ -1,0 +1,15 @@
+{
+  "GET https://oracle.example.com/api/v1/get_distribution_combination_codes": {
+    "codes": [
+      {
+        "type": "GL",
+        "distro_combo_list": [
+          {"value": "01-100-0000-0000", "description": "Corporate Cash"},
+          {"value": "01-200-0000-0000", "description": "Operating Expense"},
+          {"value": "02-100-0000-0000", "description": "Investments"},
+          {"value": "02-200-0000-0000", "description": "Receivables"}
+        ]
+      }
+    ]
+  }
+}
