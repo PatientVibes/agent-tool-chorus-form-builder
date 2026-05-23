@@ -7,3 +7,9 @@
 # comparison, but consistency on disk avoids spurious diffs).
 *.uxb.json text eol=lf
 *_manifest.json text eol=lf
+
+# JavaScript files are byte-compared in test_golden_with_rules
+# (awdForm.js between the package source and the golden copy). Force LF
+# so a Windows clone with autocrlf=true doesn't silently break the
+# byte-identity assertion.
+*.js text eol=lf
