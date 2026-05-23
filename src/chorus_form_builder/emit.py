@@ -14,12 +14,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from chorus_form_builder._types import DomainValue, EmitResult
+from chorus_form_builder._types import DomainValue, EmitResult, FormBuilderError
 from chorus_form_builder.manifest import build_manifest
 from chorus_form_builder.spec import FieldSpec, FormSpec
 
 
-class EmitError(Exception):
+class EmitError(FormBuilderError):
     """chorus_forms builder rejected the constructed form, or file write failed."""
 
 

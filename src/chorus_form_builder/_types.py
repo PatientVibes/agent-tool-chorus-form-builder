@@ -6,6 +6,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+class FormBuilderError(Exception):
+    """Base for all chorus_form_builder errors.
+
+    SpecValidationError, BindingError, and EmitError all subclass this so
+    callers can do `except FormBuilderError` for catch-all handling while
+    still being able to discriminate on the specific subclass.
+    """
+
+
 @dataclass(frozen=True)
 class DomainValue:
     """A single (value, description) pair for a combobox."""

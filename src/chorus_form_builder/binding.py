@@ -19,11 +19,11 @@ import yaml
 from jsonpath_ng import parse as jsonpath_parse
 from jsonpath_ng.exceptions import JsonPathParserError
 
-from chorus_form_builder._types import DomainValue
+from chorus_form_builder._types import DomainValue, FormBuilderError
 from chorus_form_builder.spec import BindingSpec, OpenAPIDefaultsSpec
 
 
-class BindingError(Exception):
+class BindingError(FormBuilderError):
     """OpenAPI fetch or JSONPath resolution failed."""
 
 

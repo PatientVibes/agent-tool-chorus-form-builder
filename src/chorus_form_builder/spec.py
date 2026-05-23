@@ -12,8 +12,10 @@ from typing import Any, Literal, Optional
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from chorus_form_builder._types import FormBuilderError
 
-class SpecValidationError(Exception):
+
+class SpecValidationError(FormBuilderError):
     """Spec YAML invalid — bad path, bad YAML, bad shape, bad regex, ..."""
 
 
