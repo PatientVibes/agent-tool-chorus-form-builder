@@ -44,7 +44,7 @@ After all tasks land, the repo looks like:
 | `src/chorus_form_builder/_types.py` | ~30 | shared dataclasses (DomainValue, EmitResult) — no chorus_forms imports |
 | `src/chorus_form_builder/spec.py` | ~120 | Pydantic FormSpec model + YAML loader + env-var interpolation |
 | `src/chorus_form_builder/binding.py` | ~110 | Fetcher Protocol + HttpxFetcher + GoldenFetcher + resolve_binding |
-| `src/chorus_form_builder/emit.py` | ~90 | `_spec_field_to_csd_field` + `emit` function — wraps chorus_forms |
+| `src/chorus_form_builder/emit.py` | ~90 | `_spec_field_to_form_field` + `emit` function — wraps chorus_forms |
 | `src/chorus_form_builder/manifest.py` | ~50 | `build_manifest` — pure function |
 | `src/chorus_form_builder/cli.py` | ~70 | argparse + exit-code mapping + main() entry |
 | `tests/conftest.py` | ~20 | shared fixtures (tmp_path helpers, etc.) |
@@ -69,6 +69,24 @@ Total ≈ 700 LOC across source + tests, plus the binary + JSON golden artifacts
 **Files:**
 - Create: `tests/test_chorus_forms_assumption.py` (smoke test — will live in the repo permanently as a regression-lock on the builder API)
 
+**API correction note (v2 — added after Gemini co-plan review + direct verification):**
+
+Initial plan assumed `chorus_forms.builders.classic.build_csd` and `chorus_forms.builders.uxb.build_uxb` as single-call builders. Verification against the actual `chorus_forms` source (and the harness's production `chorus_csd_analyzer/converter.py:23-60`) reveals the real surface:
+
+- **Models** live at `chorus_forms.csd.models` — `CsdForm`, `FormMeta`, **`FormField`** (not `CsdField`), `FieldGroup`, `FormLabel`, `FormButton`, `DictionaryInfo`. Pydantic `BaseModel`s.
+- **Classic XML path** is a 3-step chain:
+    1. `chorus_forms.csd.adapter.csd_to_user_screen(form)` → `UserScreenModel`
+    2. `chorus_forms.core.xml_builder.build_user_screen(user_screen_model)` → `lxml.etree._Element` (the XML envelope)
+    3. `lxml.etree.tostring(envelope, pretty_print=True, xml_declaration=True, encoding="UTF-8")` → bytes
+- **UXB JSON path** is a 2-step chain followed by Pydantic serialization:
+    1. `chorus_forms.uxb.builder.csd_to_uxb(form)` → `UxbDocument`
+    2. `chorus_forms.uxb.builder.to_design_model(uxb_doc, form_type="user_screen")` → `UxbDesignModel`
+    3. `uxb_model.model_dump(exclude_none=True)` → dict, then `json.dumps(...)`
+
+This adds **`lxml`** as a dependency (Task 1 must include it).
+
+The original Task 0 OUTCOMES (A/B/C) still apply — the implementer should still run the assumption tests first and stop if anything fails. The code below reflects the verified-real API.
+
 - [ ] **Step 1: Write the failing assumption test**
 
 Create `tests/test_chorus_forms_assumption.py`:
@@ -76,18 +94,19 @@ Create `tests/test_chorus_forms_assumption.py`:
 ```python
 """Regression-lock on chorus_forms' builder API.
 
-The form-builder design assumes:
-1. chorus_forms.builders.classic.build_csd(form) accepts a hand-constructed
-   CsdForm and returns non-empty bytes.
-2. chorus_forms.builders.uxb.build_uxb(form) accepts the same and returns
-   a serializable dict.
-3. The .csd round-trips through chorus_forms.csd.parser.parse_csd_file —
-   parsing what we built returns a form with the same field codes and
-   control types.
+Verified against chorus_forms source 2026-05-23. The form-builder design
+depends on:
+1. Models importable from chorus_forms.csd.models (CsdForm, FormMeta, FormField)
+2. CsdForm → UserScreenModel via chorus_forms.csd.adapter.csd_to_user_screen
+3. UserScreenModel → etree._Element via chorus_forms.core.xml_builder.build_user_screen
+4. etree → bytes via lxml.etree.tostring
+5. CsdForm → UxbDocument via chorus_forms.uxb.builder.csd_to_uxb
+6. UxbDocument → UxbDesignModel via chorus_forms.uxb.builder.to_design_model
+7. The .csd round-trips through chorus_forms.csd.parser.parse_csd_file
 
 If any of these break, the form-builder design is wrong and needs revision.
-This test lives in the repo permanently so future chorus_forms updates that
-break this contract are caught immediately.
+This test lives in the repo permanently so future chorus_forms updates
+that break the contract are caught immediately.
 """
 from __future__ import annotations
 
@@ -98,12 +117,26 @@ import pytest
 
 
 def _build_minimal_form():
-    """Construct a minimal CsdForm by hand — one combobox with three static values."""
-    from chorus_forms.models import (
+    """Construct a minimal CsdForm by hand — one select-style field with three
+    static domain values.
+
+    chorus_forms architecture notes (verified 2026-05-23):
+    - FormField (not CsdField) is the field class.
+    - FormField has NO direct domain_values attribute. Domain values live on
+      DictionaryInfo and attach via FormField.dictionary.
+    - DictionaryInfo.data_name is required; conventionally the same as field code.
+    - DictionaryInfo.domain_values is `Optional[list[dict]]` — list of plain
+      dicts shaped `{"value": ..., "description": ...}` (matches what the
+      chorus_forms parser produces when reading existing CSDs).
+    - control_type='select' is the chorus_forms convention for dropdown/combobox
+      fields (not 'combobox' — that's only in our user-facing YAML and gets
+      translated in emit.py).
+    """
+    from chorus_forms.csd.models import (
         CsdForm,
         FormMeta,
-        CsdField,
-        DomainValue,
+        FormField,
+        DictionaryInfo,
     )
     return CsdForm(
         meta=FormMeta(
@@ -111,72 +144,123 @@ def _build_minimal_form():
             form_title="Test Form",
             form_type="user_screen",
             num_pages=1,
-            dll_hooks=[],
         ),
         fields=[
-            CsdField(
+            FormField(
                 code="TFLD",
                 label="Test Field",
-                control_type="combobox",
-                required=False,
-                read_only=False,
-                length=None,
-                dictionary=None,
-                domain_values=[
-                    DomainValue(value="A", description="Alpha"),
-                    DomainValue(value="B", description="Bravo"),
-                    DomainValue(value="C", description="Charlie"),
-                ],
+                control_type="select",
+                dictionary=DictionaryInfo(
+                    data_name="TFLD",
+                    domain_values=[
+                        {"value": "A", "description": "Alpha"},
+                        {"value": "B", "description": "Bravo"},
+                        {"value": "C", "description": "Charlie"},
+                    ],
+                ),
             ),
         ],
-        groups=[],
-        warnings=[],
     )
 
 
-def test_chorus_forms_classic_builder_accepts_hand_constructed_form():
-    """chorus_forms.builders.classic.build_csd takes a hand-built CsdForm and
-    returns non-empty bytes."""
+def test_chorus_forms_models_import():
+    """csd.models exposes CsdForm, FormMeta, FormField at the expected paths."""
     pytest.importorskip("chorus_forms", reason="chorus_forms required")
-    from chorus_forms.builders import classic
-    form = _build_minimal_form()
-    csd_bytes = classic.build_csd(form)
-    assert isinstance(csd_bytes, bytes), f"expected bytes, got {type(csd_bytes)}"
-    assert len(csd_bytes) > 0, "expected non-empty bytes"
+    from chorus_forms.csd.models import CsdForm, FormMeta, FormField
+    assert CsdForm is not None
+    assert FormMeta is not None
+    assert FormField is not None
 
 
-def test_chorus_forms_uxb_builder_accepts_hand_constructed_form():
-    """chorus_forms.builders.uxb.build_uxb takes a hand-built CsdForm and
-    returns a JSON-serializable dict."""
+def test_csd_to_user_screen_accepts_hand_constructed_form():
+    """The adapter csd_to_user_screen takes a hand-built CsdForm and returns
+    a UserScreenModel (Pydantic) — the input to the XML builder."""
     pytest.importorskip("chorus_forms", reason="chorus_forms required")
-    from chorus_forms.builders import uxb
+    from chorus_forms.csd.adapter import csd_to_user_screen
     form = _build_minimal_form()
-    uxb_dict = uxb.build_uxb(form)
-    assert isinstance(uxb_dict, dict), f"expected dict, got {type(uxb_dict)}"
-    # Must round-trip through json.dumps cleanly (no datetime, set, etc.)
-    json.dumps(uxb_dict)
+    model = csd_to_user_screen(form)
+    # Don't assert on internal type — just that the call succeeds and returns
+    # something the next stage can consume.
+    assert model is not None
+
+
+def test_build_user_screen_produces_xml_envelope():
+    """build_user_screen takes the adapter output and returns an lxml element."""
+    pytest.importorskip("chorus_forms", reason="chorus_forms required")
+    from chorus_forms.csd.adapter import csd_to_user_screen
+    from chorus_forms.core.xml_builder import build_user_screen
+    from lxml import etree
+    form = _build_minimal_form()
+    model = csd_to_user_screen(form)
+    envelope = build_user_screen(model)
+    assert isinstance(envelope, etree._Element), f"expected etree._Element, got {type(envelope)}"
+
+
+def test_xml_envelope_serializes_to_non_empty_bytes():
+    """etree.tostring on the envelope produces deployable .csd bytes."""
+    pytest.importorskip("chorus_forms", reason="chorus_forms required")
+    from chorus_forms.csd.adapter import csd_to_user_screen
+    from chorus_forms.core.xml_builder import build_user_screen
+    from lxml import etree
+    form = _build_minimal_form()
+    envelope = build_user_screen(csd_to_user_screen(form))
+    xml_bytes = etree.tostring(envelope, pretty_print=True, xml_declaration=True, encoding="UTF-8")
+    assert isinstance(xml_bytes, bytes)
+    assert len(xml_bytes) > 0
+    # Sanity: starts with XML declaration
+    assert xml_bytes.startswith(b"<?xml")
+
+
+def test_csd_to_uxb_returns_document():
+    """uxb.builder.csd_to_uxb takes a CsdForm and returns a UxbDocument."""
+    pytest.importorskip("chorus_forms", reason="chorus_forms required")
+    from chorus_forms.uxb.builder import csd_to_uxb
+    form = _build_minimal_form()
+    doc = csd_to_uxb(form)
+    assert doc is not None
+
+
+def test_to_design_model_returns_serializable_pydantic():
+    """to_design_model output exposes model_dump (Pydantic v2) for JSON serialization."""
+    pytest.importorskip("chorus_forms", reason="chorus_forms required")
+    from chorus_forms.uxb.builder import csd_to_uxb, to_design_model
+    form = _build_minimal_form()
+    doc = csd_to_uxb(form)
+    design = to_design_model(doc, form_type=form.meta.form_type)
+    dumped = design.model_dump(exclude_none=True)
+    assert isinstance(dumped, dict)
+    # Must round-trip through json.dumps cleanly
+    json.dumps(dumped)
 
 
 def test_chorus_forms_csd_round_trips_through_parser(tmp_path):
-    """Built .csd parses back into a CsdForm with matching field codes and
-    control types. Catches bugs where the builder produces output the parser
-    refuses."""
+    """Built .csd parses back into a CsdForm with matching field codes. Catches
+    bugs where the builder produces output the parser refuses."""
     pytest.importorskip("chorus_forms", reason="chorus_forms required")
-    from chorus_forms.builders import classic
+    from chorus_forms.csd.adapter import csd_to_user_screen
+    from chorus_forms.core.xml_builder import build_user_screen
     from chorus_forms.csd.parser import parse_csd_file
+    from lxml import etree
 
     form = _build_minimal_form()
-    csd_bytes = classic.build_csd(form)
+    xml_bytes = etree.tostring(
+        build_user_screen(csd_to_user_screen(form)),
+        pretty_print=True, xml_declaration=True, encoding="UTF-8",
+    )
 
     csd_path = tmp_path / "TESTFORM.CSD"
-    csd_path.write_bytes(csd_bytes)
+    csd_path.write_bytes(xml_bytes)
 
     parsed = parse_csd_file(csd_path)
     parsed_codes = {f.code for f in parsed.fields}
     assert "TFLD" in parsed_codes, f"expected TFLD in parsed fields, got {parsed_codes}"
-    tfld = next(f for f in parsed.fields if f.code == "TFLD")
-    assert tfld.control_type == "combobox", f"expected combobox, got {tfld.control_type}"
 ```
+
+**If any of these tests FAIL at Step 3 with an import error, function-signature mismatch, or model-shape rejection:** the chorus_forms API has shifted since this plan was written (2026-05-23). The implementer must:
+1. Read the actual function signatures in the cited chorus_forms source files
+2. Adjust the test code + Task 4's emit chain accordingly
+3. Re-run the assumption tests with the corrected API
+4. ONLY proceed to Task 1 once the assumption tests pass
 
 - [ ] **Step 2: Set up the venv and install chorus_forms editable**
 
@@ -186,7 +270,7 @@ The repo has no venv yet. Bootstrap with uv:
 cd D:/agent-tool-chorus-form-builder
 uv venv
 uv pip install -e D:/chorus-repos/chorus-forms
-uv pip install pytest pydantic pyyaml httpx jsonpath-ng
+uv pip install pytest pydantic pyyaml httpx jsonpath-ng lxml
 ```
 
 - [ ] **Step 3: Run the assumption tests**
@@ -246,6 +330,7 @@ dependencies = [
     "pyyaml>=6.0",
     "httpx>=0.27",
     "jsonpath-ng>=1.6",
+    "lxml>=5.0",
 ]
 
 [project.optional-dependencies]
@@ -1225,7 +1310,7 @@ Spec: docs/superpowers/specs/2026-05-23-form-builder-v01-design.md §3"
 
 ---
 
-## Task 4: emit.py — _spec_field_to_csd_field + emit (TDD)
+## Task 4: emit.py — _spec_field_to_form_field + emit (TDD)
 
 **Files:**
 - Create: `src/chorus_form_builder/emit.py`
@@ -1247,7 +1332,7 @@ import pytest
 from chorus_form_builder._types import DomainValue
 from chorus_form_builder.emit import (
     EmitError,
-    _spec_field_to_csd_field,
+    _spec_field_to_form_field,
     emit,
 )
 from chorus_form_builder.spec import FieldSpec, FormMetaSpec, FormSpec, DomainValueSpec, OpenAPIDefaultsSpec
@@ -1282,23 +1367,32 @@ def _form_spec_static_combo() -> FormSpec:
 
 
 # --- translator unit tests ---
+# Note: FormField has NO direct domain_values; the translator places them on
+# FormField.dictionary.domain_values (chorus_forms.csd.models.DictionaryInfo).
+# length also lives on DictionaryInfo, not FormField directly.
 
 def test_translator_text_field():
     spec_field = FieldSpec(code="MEMO", label="Memo", control_type="text", length=60)
-    csd_field = _spec_field_to_csd_field(spec_field, resolved_domain=None)
-    assert csd_field.code == "MEMO"
-    assert csd_field.label == "Memo"
-    assert csd_field.control_type == "text"
-    assert csd_field.length == 60
-    assert csd_field.domain_values == []
+    ff = _spec_field_to_form_field(spec_field, resolved_domain=None)
+    assert ff.code == "MEMO"
+    assert ff.label == "Memo"
+    assert ff.control_type == "text"
+    # length is on DictionaryInfo; the translator only attaches a dictionary
+    # when length OR domain_values is set.
+    assert ff.dictionary is not None
+    assert ff.dictionary.length == 60
+    assert ff.dictionary.domain_values is None
 
 
 def test_translator_combobox_with_resolved_binding():
     spec_field = FieldSpec(code="DCMB", label="Distro", control_type="combobox")
     resolved = [DomainValue(value="X", description="X-desc"), DomainValue(value="Y", description="Y-desc")]
-    csd_field = _spec_field_to_csd_field(spec_field, resolved_domain=resolved)
-    assert len(csd_field.domain_values) == 2
-    assert csd_field.domain_values[0].value == "X"
+    ff = _spec_field_to_form_field(spec_field, resolved_domain=resolved)
+    assert ff.control_type == "select"  # spec 'combobox' → chorus_forms 'select'
+    assert ff.dictionary is not None
+    assert ff.dictionary.domain_values is not None
+    assert len(ff.dictionary.domain_values) == 2
+    assert ff.dictionary.domain_values[0]["value"] == "X"
 
 
 def test_translator_combobox_with_static_values_and_no_resolved():
@@ -1308,18 +1402,20 @@ def test_translator_combobox_with_static_values_and_no_resolved():
         control_type="combobox",
         values=[DomainValueSpec(value="A", description="Active")],
     )
-    csd_field = _spec_field_to_csd_field(spec_field, resolved_domain=None)
-    assert len(csd_field.domain_values) == 1
-    assert csd_field.domain_values[0].value == "A"
+    ff = _spec_field_to_form_field(spec_field, resolved_domain=None)
+    assert ff.dictionary is not None
+    assert len(ff.dictionary.domain_values) == 1
+    assert ff.dictionary.domain_values[0]["value"] == "A"
 
 
 def test_translator_combobox_no_domain_at_all():
-    """combobox with neither binding nor values — produces empty domain_values
-    list. Pydantic validates that at least one is present at spec load, so this
-    is a defensive default for the translator, not a hot path."""
+    """combobox with neither binding nor values — produces a FormField with
+    dictionary=None (no length, no domain_values). Pydantic validates spec-side
+    that one of binding/values is present for combobox; this defensive path
+    handles the FieldSpec(combobox, no binding, no values) construction edge."""
     spec_field = FieldSpec(code="STAT", label="S", control_type="combobox")
-    csd_field = _spec_field_to_csd_field(spec_field, resolved_domain=None)
-    assert csd_field.domain_values == []
+    ff = _spec_field_to_form_field(spec_field, resolved_domain=None)
+    assert ff.dictionary is None
 
 
 # --- emit end-to-end (uses real chorus_forms; uses tmp_path for output) ---
@@ -1392,9 +1488,18 @@ def test_emit_uses_resolved_binding_over_static_values(tmp_path):
     result = emit(spec, resolved_bindings=resolved, output_dir=tmp_path)
     parsed = parse_csd_file(result.csd_path)
     dcmb = next(f for f in parsed.fields if f.code == "DCMB")
-    # The parsed form should contain the resolved value "X"
-    assert any(dv.value == "X" for dv in dcmb.domain_values), \
-        f"expected 'X' in {[dv.value for dv in dcmb.domain_values]}"
+    # The parsed form should contain the resolved value "X" via dictionary.domain_values.
+    # Note: parser may or may not preserve the DictionaryInfo enrichment on
+    # the round trip — Task 0 validates which it does. If the parser drops
+    # the dictionary (because the .csd format itself doesn't carry the
+    # enrichment, only the v2-api does), this assertion needs to check the
+    # adapter/XML output another way (e.g., assert the XML envelope contains
+    # the value as a <Option> element). Defer to Task 0's discovery.
+    assert dcmb.dictionary is not None, \
+        f"parsed DCMB has no dictionary; round-trip dropped enrichment. " \
+        f"Adjust this test per Task 0's findings on what survives the round-trip."
+    assert any(dv["value"] == "X" for dv in dcmb.dictionary.domain_values), \
+        f"expected 'X' in {[dv['value'] for dv in dcmb.dictionary.domain_values]}"
 
 
 def test_emit_creates_output_dir_if_missing(tmp_path):
@@ -1410,7 +1515,7 @@ def test_emit_creates_output_dir_if_missing(tmp_path):
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_emit.py -v 2>&1 | tail -15`
 
-Expected: all 9 tests fail with `ImportError: cannot import name '_spec_field_to_csd_field' from 'chorus_form_builder.emit'`.
+Expected: all 9 tests fail with `ImportError: cannot import name '_spec_field_to_form_field' from 'chorus_form_builder.emit'`.
 
 - [ ] **Step 3: Implement `emit.py`**
 
@@ -1437,16 +1542,20 @@ class EmitError(Exception):
     """chorus_forms builder rejected the constructed form, or file write failed."""
 
 
-def _spec_field_to_csd_field(spec_field: FieldSpec, resolved_domain: list[DomainValue] | None):
-    """Translate a FieldSpec → chorus_forms.CsdField.
+def _spec_field_to_form_field(spec_field: FieldSpec, resolved_domain: list[DomainValue] | None):
+    """Translate a FieldSpec → chorus_forms.csd.models.FormField.
 
     Domain-value precedence:
         1. resolved_domain (from a binding fetch — Task 3 produced this)
         2. spec_field.values (static — declared inline in YAML)
         3. [] (empty — defensive default for combobox with neither)
-    """
-    from chorus_forms.models import CsdField, DomainValue as CfDomainValue
 
+    The chorus_forms FormField.domain_values shape is verified during Task 0's
+    assumption test. The dict shape `{"value": ..., "description": ...}` below
+    matches the format used by chorus_forms's own parser when reading existing
+    CSDs. If Pydantic rejects this shape during Task 0, the implementer adjusts
+    here.
+    """
     if resolved_domain is not None:
         domain_source = resolved_domain
     elif spec_field.values is not None:
@@ -1454,18 +1563,32 @@ def _spec_field_to_csd_field(spec_field: FieldSpec, resolved_domain: list[Domain
     else:
         domain_source = []
 
-    return CsdField(
+    # chorus_forms uses "select" as the control_type for dropdown/combobox fields.
+    # Our spec says "combobox" for user-facing clarity; translate here.
+    cf_control_type = "select" if spec_field.control_type == "combobox" else spec_field.control_type
+
+    from chorus_forms.csd.models import FormField, DictionaryInfo
+
+    # Domain values live on DictionaryInfo, not FormField directly (verified
+    # against chorus_forms/csd/models.py:20-32, DictionaryInfo.domain_values).
+    # length also lives on DictionaryInfo (line 25 of same file).
+    dictionary = None
+    if domain_source or spec_field.length is not None:
+        dictionary = DictionaryInfo(
+            data_name=spec_field.code,  # required; same as field code by convention
+            length=spec_field.length,
+            domain_values=[
+                {"value": d.value, "description": d.description}
+                for d in domain_source
+            ] if domain_source else None,
+        )
+
+    return FormField(
         code=spec_field.code,
         label=spec_field.label,
-        control_type=spec_field.control_type,
+        control_type=cf_control_type,
         required=spec_field.required,
-        read_only=False,
-        length=spec_field.length,
-        dictionary=None,
-        domain_values=[
-            CfDomainValue(value=d.value, description=d.description)
-            for d in domain_source
-        ],
+        dictionary=dictionary,
     )
 
 
@@ -1474,10 +1597,24 @@ def emit(
     resolved_bindings: dict[str, list[DomainValue]],
     output_dir: Path,
 ) -> EmitResult:
-    """Assemble a chorus_forms.CsdForm from the spec + resolved bindings,
-    call the Classic and UXB builders, write three files, return paths."""
-    from chorus_forms.builders import classic, uxb
-    from chorus_forms.models import CsdForm, FormMeta
+    """Assemble a chorus_forms CsdForm from the spec + resolved bindings,
+    drive the Classic XML and UXB JSON chains, write three files.
+
+    The Classic XML chain (verified against chorus_csd_analyzer/converter.py:23-60):
+        CsdForm → csd_to_user_screen → UserScreenModel
+                → build_user_screen   → lxml etree element
+                → etree.tostring       → bytes (xml_declaration + UTF-8)
+
+    The UXB JSON chain:
+        CsdForm → csd_to_uxb        → UxbDocument
+                → to_design_model    → UxbDesignModel (Pydantic)
+                → .model_dump(...)   → dict → json.dumps
+    """
+    from chorus_forms.csd.adapter import csd_to_user_screen
+    from chorus_forms.csd.models import CsdForm, FormMeta
+    from chorus_forms.core.xml_builder import build_user_screen
+    from chorus_forms.uxb.builder import csd_to_uxb, to_design_model
+    from lxml import etree
 
     try:
         form = CsdForm(
@@ -1486,27 +1623,33 @@ def emit(
                 form_title=spec.form.title,
                 form_type=spec.form.type,
                 num_pages=spec.form.pages,
-                dll_hooks=[],
             ),
             fields=[
-                _spec_field_to_csd_field(f, resolved_bindings.get(f.code))
+                _spec_field_to_form_field(f, resolved_bindings.get(f.code))
                 for f in spec.fields
             ],
-            groups=[],
-            warnings=[],
         )
     except Exception as e:
-        raise EmitError(f"failed to construct CsdForm from spec: {e}") from e
+        raise EmitError(f"failed to construct chorus_forms.csd.models.CsdForm from spec: {e}") from e
 
     try:
-        csd_bytes = classic.build_csd(form)
+        user_screen_model = csd_to_user_screen(form)
+        envelope = build_user_screen(user_screen_model)
+        csd_bytes = etree.tostring(
+            envelope,
+            pretty_print=True,
+            xml_declaration=True,
+            encoding="UTF-8",
+        )
     except Exception as e:
-        raise EmitError(f"chorus_forms.builders.classic.build_csd failed: {e}") from e
+        raise EmitError(f"Classic XML chain failed: {e}") from e
 
     try:
-        uxb_dict = uxb.build_uxb(form)
+        uxb_doc = csd_to_uxb(form)
+        uxb_model = to_design_model(uxb_doc, form_type=form.meta.form_type)
+        uxb_dict = uxb_model.model_dump(exclude_none=True)
     except Exception as e:
-        raise EmitError(f"chorus_forms.builders.uxb.build_uxb failed: {e}") from e
+        raise EmitError(f"UXB JSON chain failed: {e}") from e
 
     output_dir.mkdir(parents=True, exist_ok=True)
     csd_path = output_dir / f"{spec.form.name}.csd"
@@ -1596,7 +1739,7 @@ git add src/chorus_form_builder/emit.py src/chorus_form_builder/manifest.py test
 git commit -m "feat(emit): CsdForm assembly + manifest builder
 
 Wraps chorus_forms.builders.classic and .uxb. The translator function
-_spec_field_to_csd_field is the single seam between FormSpec and CsdField;
+_spec_field_to_form_field is the single seam between FormSpec and CsdField;
 new field types add a branch here, not anywhere else.
 
 Domain-value precedence: resolved (from binding fetch) > static (from

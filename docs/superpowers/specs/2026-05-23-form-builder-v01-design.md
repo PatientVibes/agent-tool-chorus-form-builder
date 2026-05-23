@@ -206,6 +206,14 @@ class GoldenFetcher: ...    # tests, returns canned responses from disk fixtures
 
 Thin assembler — wraps `chorus_forms` builders.
 
+> **API-correction note (added 2026-05-23 after Gemini co-plan review + direct verification of the chorus_forms source):** the `chorus_forms.builders.classic.build_csd` / `chorus_forms.builders.uxb.build_uxb` calls below are NOT the actual API. The real chain (verified against `D:/agent-harness-chorus-csd-analyzer/src/chorus_csd_analyzer/converter.py:23-60`) is:
+> - **Classic**: `csd_to_user_screen(form)` → `build_user_screen(model)` → `lxml.etree.tostring(envelope, pretty_print=True, xml_declaration=True, encoding="UTF-8")` → bytes
+> - **UXB**: `csd_to_uxb(form)` → `to_design_model(doc, form_type=...)` → `model.model_dump(exclude_none=True)` → dict
+>
+> Imports: `from chorus_forms.csd.adapter import csd_to_user_screen`, `from chorus_forms.core.xml_builder import build_user_screen`, `from chorus_forms.uxb.builder import csd_to_uxb, to_design_model`, `from lxml import etree`. Adds `lxml` as a dependency.
+>
+> Also: models are at `chorus_forms.csd.models` (not `chorus_forms.models`). FormField (not CsdField). Domain values live on `FormField.dictionary` (`DictionaryInfo.domain_values: Optional[list[dict]]`), not directly on `FormField`. See **the implementation plan's Task 0 + Task 4** for the verified-correct code; the snippet below is preserved as the historical design sketch only.
+
 ```python
 def emit(spec: FormSpec, resolved_bindings: dict[FieldCode, list[DomainValue]], output_dir: Path) -> EmitResult:
     form = CsdForm(
@@ -216,7 +224,7 @@ def emit(spec: FormSpec, resolved_bindings: dict[FieldCode, list[DomainValue]], 
             num_pages=spec.form.pages,
             dll_hooks=[],
         ),
-        fields=[_spec_field_to_csd_field(f, resolved_bindings.get(f.code)) for f in spec.fields],
+        fields=[_spec_field_to_form_field(f, resolved_bindings.get(f.code)) for f in spec.fields],
         groups=[],
         warnings=[],
     )
@@ -231,7 +239,7 @@ def emit(spec: FormSpec, resolved_bindings: dict[FieldCode, list[DomainValue]], 
     return EmitResult(...)
 ```
 
-**Field translator** (`_spec_field_to_csd_field`) is the single seam between spec-schema and chorus_forms-schema. When new field types land (date, number), they're added here.
+**Field translator** (`_spec_field_to_form_field`) is the single seam between spec-schema and chorus_forms-schema. When new field types land (date, number), they're added here.
 
 **Manifest schema:**
 
