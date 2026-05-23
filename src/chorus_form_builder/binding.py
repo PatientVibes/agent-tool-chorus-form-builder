@@ -94,19 +94,23 @@ _ENV_VAR_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
 
 
 def interpolate_env_vars(headers: dict[str, str]) -> dict[str, str]:
-    """Substitute ${VAR} -> os.environ[VAR] in every value. Raises
+    """Substitute ${VAR} → os.environ[VAR] in every value. Raises
     BindingError naming the unset variable on first missing."""
     out: dict[str, str] = {}
-    for k, v in headers.items():
-        def _sub(m: re.Match) -> str:
-            var_name = m.group(1)
-            if var_name not in os.environ:
-                raise BindingError(
-                    f"env var {var_name!r} required by header {k!r} is unset"
-                )
-            return os.environ[var_name]
-        out[k] = _ENV_VAR_RE.sub(_sub, v)
+    for header_name, raw_value in headers.items():
+        out[header_name] = _interpolate_one(header_name, raw_value)
     return out
+
+
+def _interpolate_one(header_name: str, value: str) -> str:
+    def _sub(m: re.Match) -> str:
+        var_name = m.group(1)
+        if var_name not in os.environ:
+            raise BindingError(
+                f"env var {var_name!r} required by header {header_name!r} is unset"
+            )
+        return os.environ[var_name]
+    return _ENV_VAR_RE.sub(_sub, value)
 
 
 # --- main entry point ---
@@ -161,7 +165,7 @@ def resolve_binding(
 
     # 4. Resolve env vars in headers and fetch
     headers = interpolate_env_vars(defaults.headers)
-    timeout = binding.timeout_seconds if binding.timeout_seconds else defaults.timeout_seconds
+    timeout = binding.timeout_seconds if binding.timeout_seconds is not None else defaults.timeout_seconds
     response = fetcher.get(url, headers=headers, timeout=timeout)
     response.raise_for_status()
     payload = response.body
@@ -169,7 +173,7 @@ def resolve_binding(
     # 5. Compile + apply the JSONPath
     try:
         path_expr = jsonpath_parse(binding.values_path)
-    except (JsonPathParserError, Exception) as e:
+    except JsonPathParserError as e:
         raise BindingError(
             f"invalid JSONPath {binding.values_path!r}: {e}"
         ) from e
@@ -181,15 +185,12 @@ def resolve_binding(
             f"response from {url}"
         )
 
-    # If the JSONPath uses [*] it yields one match per element; collect their values.
-    # If it points at a list node, the single match's .value IS the list.
+    # If JSONPath uses [*] or similar, jsonpath_ng yields one match per element.
+    # If it points at a single list node, that one match's .value IS the list.
     if len(matches) == 1 and isinstance(matches[0].value, list):
         extracted = matches[0].value
-    elif len(matches) >= 1 and not isinstance(matches[0].value, list):
-        # Multi-match — each match is one entry. Concatenate.
-        extracted = [m.value for m in matches]
     else:
-        extracted = matches[0].value
+        extracted = [m.value for m in matches]
 
     if not isinstance(extracted, list):
         raise BindingError(
