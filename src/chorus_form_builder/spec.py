@@ -50,6 +50,10 @@ class FieldSpec(BaseModel):
 
     @model_validator(mode="after")
     def _binding_xor_values(self) -> "FieldSpec":
+        # Combobox forbids BOTH being set; the "neither set" case is allowed
+        # by design — the emit translator handles it as an empty domain, and
+        # constructing a FieldSpec directly (bypassing load_spec) is a
+        # legitimate path for defensive tests in emit.py.
         if self.control_type == "combobox":
             if self.binding is not None and self.values is not None:
                 raise ValueError(
