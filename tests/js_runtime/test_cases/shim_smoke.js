@@ -26,7 +26,11 @@ module.exports = {
     awdForm.setRequired('MEMO', true);
     awdForm.setValue('BATC', 'BATCH-AUTO');
 
-    const methodSeq = host.calls.filter(c => c.method !== 'getValue').map(c => c.method);
+    // Whitelist the methods we care about (more robust than blacklisting
+    // getValue — if another accessor were added to host_recorder it could
+    // accidentally appear in this sequence and break the assertion).
+    const mutatorMethods = new Set(['show', 'hide', 'enable', 'disable', 'setRequired', 'setValue']);
+    const methodSeq = host.calls.filter(c => mutatorMethods.has(c.method)).map(c => c.method);
     assertions.push({
       name: 'mutator methods reach host in declared order',
       ok: methodSeq.join(',') === 'show,hide,enable,disable,setRequired,setValue',

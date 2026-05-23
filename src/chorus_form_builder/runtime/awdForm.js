@@ -1,6 +1,7 @@
 /* awdForm.js v0.1.0 — chorus-form-builder mini-runtime shim
  *
- * Public API used by generated customRules JS:
+ * Public API used by generated customRules JS (canonical contract:
+ * docs/superpowers/specs/2026-05-23-procedure-js-generator-v01-design.md §3):
  *   awdForm.getValue(code)
  *   awdForm.isEmpty(code)
  *   awdForm.show(code)
@@ -11,6 +12,12 @@
  *   awdForm.setValue(code, v)         -- does NOT fire field-change
  *   awdForm.on(eventName, fn)         -- 'form-open' or 'field-change:CODE'
  *   awdForm._emit(eventName)          -- TEST-ONLY: synthetic event trigger
+ *
+ * PRODUCTION DEPLOY REQUIREMENT: window.__awdFormHost MUST be set before
+ * this script loads. If absent, every mutator silently no-ops (the design
+ * choice for the v0.1 test harness, where a stub host attaches at load
+ * time). The C v0.2 bridge will install a real Chorus-runtime host here;
+ * an unbound host in production is a wiring bug, not a feature.
  *
  * In v0.1, every state-mutator delegates to window.__awdFormHost (the test
  * runner or future Chorus bridge supplies that host). The bridge to the
