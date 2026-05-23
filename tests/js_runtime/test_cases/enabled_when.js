@@ -38,6 +38,7 @@ module.exports = {
     a.push({
       name: 'STAT=P -> enable ACCT',
       ok: host.calls[host.calls.length - 1].method === 'enable',
+      detail: JSON.stringify(host.calls[host.calls.length - 1]),
     });
 
     // STAT='R' (not in set) -> disable
@@ -46,6 +47,7 @@ module.exports = {
     a.push({
       name: 'STAT=R -> disable ACCT',
       ok: host.calls[host.calls.length - 1].method === 'disable',
+      detail: JSON.stringify(host.calls[host.calls.length - 1]),
     });
 
     return {assertions: a};

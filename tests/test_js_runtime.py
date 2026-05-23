@@ -7,6 +7,17 @@ parses one JSON line per assertion, and surfaces any failures.
 
 If `node` isn't on PATH, every test in this module skips with a clear
 message — the Python suite still runs end-to-end.
+
+DRIFT WARNING: the customRules template literals in each test case are
+HAND-WRITTEN — they reproduce the shape that procedures.compile_rules
+currently emits, but they are NOT regenerated from compile_rules at test
+time. A future Task-3 codegen change that re-shapes the JS output (e.g.,
+renamed shim methods, different event name conventions) would let these
+integration tests keep passing on stale JS while real-world output drifts.
+When updating compile_rules, also update each test case here so the
+shapes stay aligned. (A complementary v0.2 follow-up could generate the
+customRules string from compile_rules at test time to eliminate the
+drift surface entirely.)
 """
 from __future__ import annotations
 

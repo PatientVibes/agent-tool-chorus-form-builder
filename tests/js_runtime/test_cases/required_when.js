@@ -1,3 +1,6 @@
+// One required_when rule — verifies setRequired(field, bool) fires with
+// the right boolean both on form-open and on field-change.
+
 const customRules = `
 (function(awdForm) {
   function applyAll() {
