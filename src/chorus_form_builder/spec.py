@@ -65,6 +65,10 @@ class FieldSpec(BaseModel):
     default_when: Optional[str] = None
     default_value: Optional[Union[str, int, float, bool]] = None
 
+    # Pydantic v2 runs model_validator(mode="after") in declaration order.
+    # The order below (binding-xor → default pairing → rule-parse) is
+    # intentional: cheaper checks come first, and the rule-parse depends on
+    # the procedures module loading cleanly. Don't reorder without thinking.
     @model_validator(mode="after")
     def _binding_xor_values(self) -> "FieldSpec":
         # Combobox forbids BOTH being set; the "neither set" case is allowed
