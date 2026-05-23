@@ -1,7 +1,7 @@
 {
   "generator": "chorus-form-builder",
   "generator_version": "0.1.0",
-  "generated_at": "2026-05-23T15:10:35Z",
+  "generated_at": "2026-05-23T16:00:57Z",
   "form": {
     "name": "TXTCOMBO",
     "title": "Text + Combo",
@@ -14,7 +14,7 @@
       "endpoint": "/codes",
       "method": "GET",
       "values_path": "$.items[*]",
-      "fetched_at": "2026-05-23T15:10:35Z",
+      "fetched_at": "2026-05-23T16:00:57Z",
       "value_count": 3
     }
   ]
