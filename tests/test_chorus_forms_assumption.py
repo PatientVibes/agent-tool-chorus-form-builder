@@ -31,6 +31,8 @@ import json
 
 import pytest
 
+pytest.importorskip("chorus_forms", reason="chorus_forms required for these contract tests")
+
 
 def _build_minimal_form():
     """Construct a minimal CsdForm by hand — one combobox-style field with three
@@ -82,26 +84,20 @@ def _build_minimal_form():
 
 def test_chorus_forms_models_import():
     """csd.models exposes CsdForm, FormMeta, FormField at the expected paths."""
-    pytest.importorskip("chorus_forms", reason="chorus_forms required")
     from chorus_forms.csd.models import CsdForm, FormMeta, FormField
-    assert CsdForm is not None
-    assert FormMeta is not None
-    assert FormField is not None
 
 
 def test_csd_to_user_screen_accepts_hand_constructed_form():
     """The adapter csd_to_user_screen takes a hand-built CsdForm and returns
     a UserScreenModel (Pydantic) — the input to the XML builder."""
-    pytest.importorskip("chorus_forms", reason="chorus_forms required")
     from chorus_forms.csd.adapter import csd_to_user_screen
     form = _build_minimal_form()
     model = csd_to_user_screen(form)
-    assert model is not None
+    assert hasattr(model, "model_dump"), f"expected Pydantic model, got {type(model)}"
 
 
 def test_build_user_screen_produces_xml_envelope():
     """build_user_screen takes the adapter output and returns an lxml element."""
-    pytest.importorskip("chorus_forms", reason="chorus_forms required")
     from chorus_forms.csd.adapter import csd_to_user_screen
     from chorus_forms.core.xml_builder import build_user_screen
     from lxml import etree
@@ -113,7 +109,6 @@ def test_build_user_screen_produces_xml_envelope():
 
 def test_xml_envelope_serializes_to_non_empty_bytes():
     """etree.tostring on the envelope produces deployable .csd bytes."""
-    pytest.importorskip("chorus_forms", reason="chorus_forms required")
     from chorus_forms.csd.adapter import csd_to_user_screen
     from chorus_forms.core.xml_builder import build_user_screen
     from lxml import etree
@@ -127,16 +122,14 @@ def test_xml_envelope_serializes_to_non_empty_bytes():
 
 def test_csd_to_uxb_returns_document():
     """uxb.builder.csd_to_uxb takes a CsdForm and returns a UxbDocument."""
-    pytest.importorskip("chorus_forms", reason="chorus_forms required")
     from chorus_forms.uxb.builder import csd_to_uxb
     form = _build_minimal_form()
     doc = csd_to_uxb(form)
-    assert doc is not None
+    assert hasattr(doc, "model_dump"), f"expected Pydantic model, got {type(doc)}"
 
 
 def test_to_design_model_returns_serializable_pydantic():
     """to_design_model output exposes model_dump (Pydantic v2) for JSON serialization."""
-    pytest.importorskip("chorus_forms", reason="chorus_forms required")
     from chorus_forms.uxb.builder import csd_to_uxb, to_design_model
     form = _build_minimal_form()
     doc = csd_to_uxb(form)
@@ -156,7 +149,6 @@ def test_xml_round_trips_through_xml_parser():
     The returned model is a UserScreenModel; field names live in control.name
     across all pages, not in a CsdForm.fields list.
     """
-    pytest.importorskip("chorus_forms", reason="chorus_forms required")
     from chorus_forms.csd.adapter import csd_to_user_screen
     from chorus_forms.core.xml_builder import build_user_screen
     from chorus_forms.core.xml_parser import parse_xml_string
