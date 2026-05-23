@@ -477,6 +477,27 @@ def _referenced_field_codes(rules: list[tuple[str, str, str, Any, object]]) -> l
     return seen
 
 
+# JS reserved words that are EXACTLY 4 characters long. Field codes are
+# also exactly 4 characters (regex ^[A-Z][A-Z0-9]{3}$), so a field code
+# that lowercases to one of these would emit syntax-invalid JS like
+# `var null = awdForm.getValue("NULL");`. _safe_var below adds an
+# underscore prefix only on collision so the emitted JS stays valid
+# without churning the existing tests that use STAT/MEMO/etc.
+_JS_RESERVED_4CHAR = frozenset({
+    "null", "true", "case", "else", "enum", "void", "with", "this",
+    "byte", "char", "goto", "long",
+})
+
+
+def _safe_var(code: str) -> str:
+    """Lowercase the field code into a JS-safe local variable name.
+    Prefixes with '_' only when the lowercased code collides with a JS
+    reserved word — non-colliding codes (STAT, MEMO, ACCT, ...) keep
+    their natural lowercase form."""
+    lower = code.lower()
+    return f"_{lower}" if lower in _JS_RESERVED_4CHAR else lower
+
+
 def compile_rules(fields) -> CompiledRules:
     """Top-level: list[FieldSpec] -> CompiledRules.
 
@@ -487,7 +508,7 @@ def compile_rules(fields) -> CompiledRules:
         return CompiledRules(custom_rules_js="", include_list=[], rule_summary=[])
 
     referenced_codes = _referenced_field_codes(rules)
-    varmap = {code: code.lower() for code in referenced_codes}
+    varmap = {code: _safe_var(code) for code in referenced_codes}
 
     lines: list[str] = []
     lines.append("(function(awdForm) {")

@@ -299,6 +299,29 @@ def test_compile_rules_deterministic():
     assert js1 == js2
 
 
+def test_compile_rules_reserved_word_field_code():
+    """Codex caught: a valid 4-char field code that lowercases to a JS reserved
+    word (NULL, TRUE, THIS, VOID, WITH, ...) would have emitted invalid JS like
+    `var null = awdForm.getValue("NULL");`. _safe_var prefixes those names
+    with an underscore so the emitted JS is syntactically valid.
+    """
+    fields = [
+        _field("NULL", control_type="combobox",
+               values=[DomainValueSpec(value="A", description="A")]),
+        _field("MEMO", length=60, visible_when='NULL == "A"'),
+    ]
+    js = compile_rules(fields).custom_rules_js
+    # The local var name for NULL must be sanitized to '_null', not 'null'.
+    assert 'var _null = awdForm.getValue("NULL");' in js, \
+        f"NULL field code should sanitize to _null; got: {js}"
+    # The condition referencing NULL must also use the sanitized name.
+    assert 'awdForm[(_null === "A") ? "show" : "hide"]("MEMO");' in js, \
+        f"NULL field reference should use _null in the condition; got: {js}"
+    # The event subscription still uses the original CODE (which is what
+    # the runtime dispatches on — only the local JS var name is sanitized).
+    assert 'awdForm.on("field-change:NULL", applyAll);' in js
+
+
 def test_compile_rules_compound_conditions():
     """Cross-branch review caught: And / Or / Not / NotIn codegen paths were
     only exercised indirectly via the golden — no dedicated codegen test
