@@ -7,7 +7,7 @@ preserves ${VAR} templates verbatim.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -58,6 +58,13 @@ class FieldSpec(BaseModel):
     binding: Optional[BindingSpec] = None
     values: Optional[list[DomainValueSpec]] = None  # static domain values
 
+    # --- v0.2 rule attributes (sub-project C) ---
+    visible_when: Optional[str] = None
+    enabled_when: Optional[str] = None
+    required_when: Optional[str] = None
+    default_when: Optional[str] = None
+    default_value: Optional[Union[str, int, float, bool]] = None
+
     @model_validator(mode="after")
     def _binding_xor_values(self) -> "FieldSpec":
         # Combobox forbids BOTH being set; the "neither set" case is allowed
@@ -70,6 +77,48 @@ class FieldSpec(BaseModel):
                     f"field {self.code}: combobox must have exactly one of "
                     f"'binding' (dynamic) or 'values' (static); both are set"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _default_when_value_paired(self) -> "FieldSpec":
+        """default_when and default_value must both be set or both absent.
+        Set-without-pair on either side is a spec authoring error."""
+        has_when = self.default_when is not None
+        has_value = self.default_value is not None
+        if has_when != has_value:
+            raise ValueError(
+                f"field {self.code}: default_when and default_value must be "
+                f"set together (got default_when={self.default_when!r}, "
+                f"default_value={self.default_value!r})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _rule_strings_parse(self) -> "FieldSpec":
+        """Parse each non-None rule string at load_spec time.
+
+        Catches grammar errors before any downstream code touches the rule.
+        Field-reference scope validation happens at the FormSpec level
+        (later, when the full set of field codes is known).
+
+        Import is deferred to avoid a spec <-> procedures circular import.
+        """
+        from chorus_form_builder.procedures import parse_rule_expr
+        for kind, src in (
+            ("visible_when", self.visible_when),
+            ("enabled_when", self.enabled_when),
+            ("required_when", self.required_when),
+            ("default_when", self.default_when),
+        ):
+            if src is None:
+                continue
+            try:
+                parse_rule_expr(src)
+            except Exception as e:
+                # Re-raise with field + kind context
+                raise ValueError(
+                    f"field {self.code}: {kind}: {e}"
+                ) from e
         return self
 
 
@@ -117,6 +166,30 @@ class FormSpec(BaseModel):
                 seen.add(c)
             raise ValueError(f"duplicate field code(s): {sorted(set(dupes))}")
         return v
+
+    @model_validator(mode="after")
+    def _rule_field_refs_resolve(self) -> "FormSpec":
+        """Every rule's field references must resolve to a field code in this
+        form. Catches typos like 'XYZQ' instead of 'STAT'."""
+        from chorus_form_builder.procedures import parse_rule_expr, validate_rule
+        known_codes = {f.code for f in self.fields}
+        for f in self.fields:
+            for kind, src in (
+                ("visible_when", f.visible_when),
+                ("enabled_when", f.enabled_when),
+                ("required_when", f.required_when),
+                ("default_when", f.default_when),
+            ):
+                if src is None:
+                    continue
+                ast = parse_rule_expr(src)  # already validated to parse in FieldSpec
+                try:
+                    validate_rule(ast, known_codes)
+                except Exception as e:
+                    raise ValueError(
+                        f"field {f.code}: {kind}: {e}"
+                    ) from e
+        return self
 
 
 def load_spec(path: Path) -> FormSpec:
