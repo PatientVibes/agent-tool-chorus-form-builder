@@ -1,0 +1,28 @@
+form:
+  name: RULEFRM1
+  title: Rules Demo
+fields:
+  - code: STAT
+    label: Status
+    control_type: combobox
+    values:
+      - {value: A, description: Active}
+      - {value: R, description: Rejected}
+      - {value: P, description: Pending}
+  - code: MEMO
+    label: "Rejection memo"
+    control_type: text
+    length: 200
+    visible_when: 'STAT == "R"'
+    required_when: 'STAT == "R"'
+  - code: ACCT
+    label: Account
+    control_type: text
+    length: 10
+    enabled_when: 'STAT in ["A", "P"]'
+  - code: BATC
+    label: Batch
+    control_type: text
+    length: 6
+    default_when: 'STAT == "A"'
+    default_value: "BATCH-AUTO"

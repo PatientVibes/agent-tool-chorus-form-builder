@@ -16,6 +16,7 @@ from pathlib import Path
 
 from chorus_form_builder._types import DomainValue, EmitResult, FormBuilderError
 from chorus_form_builder.manifest import build_manifest
+from chorus_form_builder.procedures import compile_rules
 from chorus_form_builder.spec import FieldSpec, FormSpec
 
 
@@ -74,10 +75,13 @@ def emit(
     output_dir: Path,
 ) -> EmitResult:
     """Assemble a chorus_forms CsdForm from the spec + resolved bindings,
-    drive the Classic XML and UXB JSON chains, write three files.
+    compile any procedure rules into customRules + includeList, drive the
+    Classic XML and UXB JSON chains, write the three artifacts (and the
+    awdForm.js shim alongside if any rules were emitted).
 
     Classic XML chain:
-        CsdForm → csd_to_user_screen → UserScreenModel
+        CsdForm → csd_to_user_screen → UserScreenModel(.screen_data: ScreenDefinitionModel)
+                                                       ^^ rules slots live here
                 → build_user_screen   → lxml etree element
                 → etree.tostring       → bytes (xml_declaration + UTF-8)
 
@@ -85,13 +89,23 @@ def emit(
         CsdForm → csd_to_uxb        → UxbDocument
                 → to_design_model    → UxbDesignModel (Pydantic)
                 → .model_dump(...)   → dict → json.dumps
+
+    Sub-project C v0.1 API note (verified via Task 0 canary at
+    tests/test_chorus_forms_rules_assumption.py): custom_rules and
+    include_list are NOT on CsdForm. They live on ScreenDefinitionModel,
+    one level downstream. We inject them between adapter and builder.
     """
     from chorus_forms.csd.adapter import csd_to_user_screen
     from chorus_forms.csd.models import CsdForm, FormMeta
     from chorus_forms.core.xml_builder import build_user_screen
+    from chorus_forms.models.screen import IncludeFile
     from chorus_forms.uxb.builder import csd_to_uxb, to_design_model
     from lxml import etree
 
+    # ----- compile procedure rules (pure, no I/O) -----
+    compiled = compile_rules(spec.fields)
+
+    # ----- assemble the chorus_forms CsdForm (no rule slots — those live downstream) -----
     try:
         form = CsdForm(
             meta=FormMeta(
@@ -108,8 +122,21 @@ def emit(
     except Exception as e:
         raise EmitError(f"failed to construct chorus_forms.csd.models.CsdForm from spec: {e}") from e
 
+    # ----- Classic XML chain — inject rules at ScreenDefinitionModel level -----
     try:
         user_screen_model = csd_to_user_screen(form)
+
+        # Inject custom_rules + include_list AFTER adapter, BEFORE builder.
+        # The plan's original "CsdForm(custom_rules=..., include_list=...)"
+        # approach doesn't work — see Task 0 canary for the discovery.
+        if compiled.custom_rules_js:
+            user_screen_model.screen_data.custom_rules = compiled.custom_rules_js
+        if compiled.include_list:
+            user_screen_model.screen_data.include_list = [
+                IncludeFile(js_file=entry["js_file"])
+                for entry in compiled.include_list
+            ]
+
         envelope = build_user_screen(user_screen_model)
         csd_bytes = etree.tostring(
             envelope,
@@ -120,6 +147,7 @@ def emit(
     except Exception as e:
         raise EmitError(f"Classic XML chain failed: {e}") from e
 
+    # ----- UXB JSON chain (unchanged; UXB output is handler-less in v0.1) -----
     try:
         uxb_doc = csd_to_uxb(form)
         uxb_model = to_design_model(uxb_doc, form_type=form.meta.form_type)
@@ -135,8 +163,26 @@ def emit(
     csd_path.write_bytes(csd_bytes)
     uxb_path.write_text(json.dumps(uxb_dict, indent=2), encoding="utf-8")
     manifest_path.write_text(
-        json.dumps(build_manifest(spec, resolved_bindings), indent=2),
+        json.dumps(
+            build_manifest(spec, resolved_bindings, rule_summary=compiled.rule_summary),
+            indent=2,
+        ),
         encoding="utf-8",
     )
+
+    # ----- ship awdForm.js alongside the .csd ONLY when rules were emitted -----
+    if compiled.custom_rules_js:
+        shim_src = Path(__file__).resolve().parent / "runtime" / "awdForm.js"
+        try:
+            (output_dir / "awdForm.js").write_bytes(shim_src.read_bytes())
+        except FileNotFoundError as e:
+            # Surface a clean EmitError instead of a raw OSError. The shim
+            # ships via [tool.setuptools.package-data] in pyproject.toml;
+            # a missing file here means the install is broken.
+            raise EmitError(
+                f"awdForm.js shim missing from install at {shim_src}; "
+                f"check pyproject.toml's [tool.setuptools.package-data] "
+                f"and reinstall the package"
+            ) from e
 
     return EmitResult(csd_path=csd_path, uxb_path=uxb_path, manifest_path=manifest_path)

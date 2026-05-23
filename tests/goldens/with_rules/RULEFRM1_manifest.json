@@ -1,0 +1,37 @@
+{
+  "generator": "chorus-form-builder",
+  "generator_version": "0.1.0",
+  "generated_at": "2026-05-23T18:37:40Z",
+  "form": {
+    "name": "RULEFRM1",
+    "title": "Rules Demo",
+    "field_count": 4
+  },
+  "bindings": [],
+  "rules": [
+    {
+      "field_code": "MEMO",
+      "kind": "visible_when",
+      "source": "STAT == \"R\""
+    },
+    {
+      "field_code": "MEMO",
+      "kind": "required_when",
+      "source": "STAT == \"R\""
+    },
+    {
+      "field_code": "ACCT",
+      "kind": "enabled_when",
+      "source": "STAT in [\"A\", \"P\"]"
+    },
+    {
+      "field_code": "BATC",
+      "kind": "default_when",
+      "source": "STAT == \"A\"",
+      "default_value": "BATCH-AUTO"
+    }
+  ],
+  "uxb_handlers_emitted": false,
+  "runtime_validated": false,
+  "shim_version": "0.1.0"
+}

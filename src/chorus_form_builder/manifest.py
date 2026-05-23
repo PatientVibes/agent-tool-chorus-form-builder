@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import datetime
 import json
-from typing import Any
+from typing import Any, Optional
 
 from chorus_form_builder import __version__
 from chorus_form_builder._types import DomainValue
@@ -11,13 +11,23 @@ from chorus_form_builder.spec import FormSpec
 
 _GENERATOR_NAME = "chorus-form-builder"
 _GENERATOR_VERSION = __version__
+# Keep in sync with the inline version comment at the top of
+# src/chorus_form_builder/runtime/awdForm.js. When the shim is bumped
+# (e.g., a real-runtime bridge in C v0.2), update BOTH this constant
+# and the shim's header.
+_SHIM_VERSION = "0.1.0"
 
 
 def _now_iso() -> str:
     return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def build_manifest(spec: FormSpec, resolved_bindings: dict[str, list[DomainValue]]) -> dict[str, Any]:
+def build_manifest(
+    spec: FormSpec,
+    resolved_bindings: dict[str, list[DomainValue]],
+    *,
+    rule_summary: Optional[list[dict]] = None,
+) -> dict[str, Any]:
     """Construct the provenance JSON shape.
 
     All timestamps in a single manifest share one captured `now` — the
@@ -25,6 +35,10 @@ def build_manifest(spec: FormSpec, resolved_bindings: dict[str, list[DomainValue
     (the resolver ran before this function), it records when the manifest
     was assembled. v0.1 trade-off; carrying the real fetch time would
     require threading it through from the binding resolver.
+
+    `rule_summary` (sub-project C) carries the per-rule provenance:
+    [{field_code, kind, source, default_value?}, ...]. Defaults to [] when
+    not provided so callers that don't yet thread it through stay valid.
     """
     now = _now_iso()
     bindings_records = []
@@ -42,6 +56,8 @@ def build_manifest(spec: FormSpec, resolved_bindings: dict[str, list[DomainValue
             "value_count": domain_count,
         })
 
+    rule_records = rule_summary or []
+
     return {
         "generator": _GENERATOR_NAME,
         "generator_version": _GENERATOR_VERSION,
@@ -52,4 +68,8 @@ def build_manifest(spec: FormSpec, resolved_bindings: dict[str, list[DomainValue
             "field_count": len(spec.fields),
         },
         "bindings": bindings_records,
+        "rules": rule_records,
+        "uxb_handlers_emitted": False,
+        "runtime_validated": False,
+        "shim_version": _SHIM_VERSION,
     }

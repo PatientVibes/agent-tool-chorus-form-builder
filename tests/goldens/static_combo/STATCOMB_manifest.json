@@ -1,11 +1,15 @@
 {
   "generator": "chorus-form-builder",
   "generator_version": "0.1.0",
-  "generated_at": "2026-05-23T16:00:57Z",
+  "generated_at": "2026-05-23T18:37:40Z",
   "form": {
     "name": "STATCOMB",
     "title": "Static Combo Test",
     "field_count": 1
   },
-  "bindings": []
+  "bindings": [],
+  "rules": [],
+  "uxb_handlers_emitted": false,
+  "runtime_validated": false,
+  "shim_version": "0.1.0"
 }

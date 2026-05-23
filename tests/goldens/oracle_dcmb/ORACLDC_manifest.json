@@ -1,7 +1,7 @@
 {
   "generator": "chorus-form-builder",
   "generator_version": "0.1.0",
-  "generated_at": "2026-05-23T16:00:57Z",
+  "generated_at": "2026-05-23T18:37:40Z",
   "form": {
     "name": "ORACLDC",
     "title": "Oracle Distribution Combo",
@@ -14,8 +14,12 @@
       "endpoint": "/get_distribution_combination_codes",
       "method": "GET",
       "values_path": "$.codes[0].distro_combo_list",
-      "fetched_at": "2026-05-23T16:00:57Z",
+      "fetched_at": "2026-05-23T18:37:40Z",
       "value_count": 4
     }
-  ]
+  ],
+  "rules": [],
+  "uxb_handlers_emitted": false,
+  "runtime_validated": false,
+  "shim_version": "0.1.0"
 }

@@ -219,3 +219,69 @@ def test_emit_creates_output_dir_if_missing(tmp_path):
     result = emit(spec, resolved_bindings={}, output_dir=missing_dir)
     assert missing_dir.is_dir()
     assert result.csd_path.is_file()
+
+
+# --- sub-project C: emit pipeline integration ---
+
+from chorus_form_builder.spec import DomainValueSpec  # already imported but explicit for clarity
+
+
+def _form_spec_with_visibility_rule() -> FormSpec:
+    return FormSpec(
+        form=FormMetaSpec(name="RULEFORM", title="Rule Form"),
+        openapi_defaults=OpenAPIDefaultsSpec(),
+        fields=[
+            FieldSpec(code="STAT", label="Status", control_type="combobox",
+                      values=[DomainValueSpec(value="A", description="Active"),
+                              DomainValueSpec(value="R", description="Rejected")]),
+            FieldSpec(code="MEMO", label="Memo", control_type="text", length=60,
+                      visible_when='STAT == "R"'),
+        ],
+    )
+
+
+def test_emit_rule_free_form_emits_no_custom_rules(tmp_path):
+    """A form with no rules: emitted .csd has empty/no <customRules>, no jsFile
+    in <includeList>, and no awdForm.js next to the .csd."""
+    spec = _form_spec_static_combo()  # the existing rule-free fixture
+    result = emit(spec, resolved_bindings={}, output_dir=tmp_path)
+    xml = result.csd_path.read_text(encoding="utf-8")
+    assert "<jsFile>awdForm.js</jsFile>" not in xml
+    assert not (tmp_path / "awdForm.js").exists(), "shim should not be copied for rule-free forms"
+
+
+def test_emit_rule_bearing_form_attaches_js_and_include(tmp_path):
+    spec = _form_spec_with_visibility_rule()
+    result = emit(spec, resolved_bindings={}, output_dir=tmp_path)
+    xml = result.csd_path.read_text(encoding="utf-8")
+    assert "<customRules>" in xml
+    assert "(function(awdForm)" in xml
+    assert 'awdForm.on(&quot;field-change:STAT&quot;, applyAll);' in xml or \
+           'awdForm.on("field-change:STAT", applyAll);' in xml
+    assert "<jsFile>awdForm.js</jsFile>" in xml
+    assert (tmp_path / "awdForm.js").is_file()
+    # And the shipped shim should be the same as the package-data file
+    shim_src = Path(__file__).resolve().parent.parent / "src" / "chorus_form_builder" / "runtime" / "awdForm.js"
+    assert (tmp_path / "awdForm.js").read_bytes() == shim_src.read_bytes()
+
+
+def test_emit_manifest_includes_new_fields(tmp_path):
+    spec = _form_spec_with_visibility_rule()
+    result = emit(spec, resolved_bindings={}, output_dir=tmp_path)
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    # New fields all present
+    assert manifest["uxb_handlers_emitted"] is False
+    assert manifest["runtime_validated"] is False
+    assert manifest["shim_version"] == "0.1.0"
+    assert isinstance(manifest["rules"], list)
+    assert any(r["field_code"] == "MEMO" and r["kind"] == "visible_when" for r in manifest["rules"])
+
+
+def test_emit_manifest_empty_rules_when_no_rules(tmp_path):
+    """Rule-free form -> rules: [] in manifest; uxb_handlers_emitted still false."""
+    spec = _form_spec_static_combo()
+    result = emit(spec, resolved_bindings={}, output_dir=tmp_path)
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["rules"] == []
+    assert manifest["uxb_handlers_emitted"] is False
+    assert manifest["runtime_validated"] is False

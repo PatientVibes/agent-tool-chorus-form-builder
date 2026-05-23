@@ -54,6 +54,53 @@ fields:
       description_field: description
 ```
 
+## Rules (conditional show/hide, etc.)
+
+Form fields can carry optional rule attributes that drive conditional behavior at runtime:
+
+```yaml
+fields:
+  - code: STAT
+    label: Status
+    control_type: combobox
+    values:
+      - {value: A, description: Active}
+      - {value: R, description: Rejected}
+
+  - code: MEMO
+    label: "Rejection memo"
+    control_type: text
+    length: 200
+    visible_when: STAT == "R"     # only show when STAT is Rejected
+    required_when: STAT == "R"    # required only in that case
+
+  - code: ACCT
+    label: Account
+    control_type: text
+    length: 10
+    enabled_when: STAT in ["A", "P"]   # editable for Active or Pending
+
+  - code: BATC
+    label: Batch
+    control_type: text
+    length: 6
+    default_when: STAT == "A"
+    default_value: "BATCH-AUTO"        # set-if-empty when STAT becomes Active
+```
+
+When the spec contains any rules, the generated `.csd` carries a `<customRules>` block of compiled JavaScript plus a `<jsFile>awdForm.js</jsFile>` entry in `<includeList>`. A copy of `awdForm.js` (the mini-runtime shim) is also written next to the `.csd` for deployment.
+
+**Condition grammar** (Tier 2, Python-style operator precedence):
+
+- `==`, `!=`, `<`, `>`, `<=`, `>=` against string / numeric / boolean / null literals
+- `in [...]` and `not in [...]` membership
+- `and`, `or`, `not`, parens
+- Field references must be 4-character uppercase codes resolving to a field in the same form
+
+**Deployment** (one-time per environment): copy `awdForm.js` into `/awd/forms/lib/` on the Chorus server so the runtime can resolve the `<jsFile>` reference site-wide.
+
+**Limits in v0.1**: UXB JSON output does not honor rules (`uxb_handlers_emitted: false` in the manifest). `default_value` rules are set-if-empty only (no clobber). `setValue` does not cascade into field-change events. The shim is documented but not yet bridged to the live Chorus runtime (`runtime_validated: false` until a dev-soak verification recipe runs as part of C v0.2).
+
 ## Output
 
 For each run, writes three files into the output directory:
