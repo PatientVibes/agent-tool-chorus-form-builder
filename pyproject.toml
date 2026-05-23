@@ -29,6 +29,12 @@ chorus-forms = { path = "../chorus-repos/chorus-forms", editable = true }
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+chorus_form_builder = ["runtime/*.js"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["chorus_form_builder*"]
