@@ -297,3 +297,40 @@ def test_compile_rules_deterministic():
     js1 = compile_rules(_make_fields()).custom_rules_js
     js2 = compile_rules(_make_fields()).custom_rules_js
     assert js1 == js2
+
+
+def test_compile_rules_compound_conditions():
+    """Cross-branch review caught: And / Or / Not / NotIn codegen paths were
+    only exercised indirectly via the golden — no dedicated codegen test
+    asserted the JS produced for compound conditions. Each rendering path in
+    _render_condition deserves a direct assertion so a future refactor of
+    that dispatch surfaces here, not in a golden diff.
+    """
+    fields = [
+        _field("STAT", control_type="combobox",
+               values=[DomainValueSpec(value="A", description="A")]),
+        _field("AMTV", length=10),
+        # `and` + numeric comparison
+        _field("FLD1", length=60, visible_when='STAT == "A" and AMTV > 100'),
+        # `or`
+        _field("FLD2", length=60, visible_when='STAT == "A" or STAT == "P"'),
+        # `not` + parens
+        _field("FLD3", length=60, visible_when='not (STAT == "R")'),
+        # `not in`
+        _field("FLD4", length=60, visible_when='STAT not in ["R", "C"]'),
+    ]
+    js = compile_rules(fields).custom_rules_js
+
+    # And — wraps the whole compound in outer parens, sub-expressions bare
+    assert '(stat === "A" && amtv > 100)' in js, \
+        f"And path didn't render expected JS; got: {js}"
+    # Or — same pattern
+    assert '(stat === "A" || stat === "P")' in js, \
+        f"Or path didn't render expected JS; got: {js}"
+    # Not (with Paren) — !((inner)). The double parens come from Not wrapping
+    # the Paren node which itself adds parens around its inner.
+    assert '!((stat === "R"))' in js, \
+        f"Not/Paren paths didn't render expected JS; got: {js}"
+    # NotIn — each comparison wrapped in parens, joined by &&
+    assert '((stat !== "R") && (stat !== "C"))' in js, \
+        f"NotIn path didn't render expected JS; got: {js}"
