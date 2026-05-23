@@ -5,11 +5,12 @@ import datetime
 import json
 from typing import Any
 
+from chorus_form_builder import __version__
 from chorus_form_builder._types import DomainValue
 from chorus_form_builder.spec import FormSpec
 
 _GENERATOR_NAME = "chorus-form-builder"
-_GENERATOR_VERSION = "0.1.0"
+_GENERATOR_VERSION = __version__
 
 
 def _now_iso() -> str:

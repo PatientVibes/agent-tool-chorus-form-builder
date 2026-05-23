@@ -14,12 +14,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+# __version__ is defined BEFORE submodule imports so manifest.py (imported
+# transitively via emit) can do `from chorus_form_builder import __version__`
+# without hitting a partially-initialized module.
+__version__ = "0.1.0"
+
 from chorus_form_builder._types import DomainValue, EmitResult, FormBuilderError
 from chorus_form_builder.binding import BindingError, Fetcher, HttpxFetcher, NoFetchFetcher, resolve_binding
 from chorus_form_builder.emit import EmitError, emit
 from chorus_form_builder.spec import SpecValidationError, load_spec
-
-__version__ = "0.1.0"
 
 
 def build_form(

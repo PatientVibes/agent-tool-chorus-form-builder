@@ -5,8 +5,8 @@ Generate Chorus forms (Classic XML `.csd` + UXB JSON) from a declarative YAML sp
 ## Quick start
 
 ```bash
-# Install
-uv tool install --editable D:/agent-tool-chorus-form-builder
+# Install (run from a clone of this repo)
+uv tool install --editable .
 
 # Smallest invocation — static-values combobox, no network
 chorus-form-build \
