@@ -368,3 +368,171 @@ def validate_rule(ast: object, known_field_codes: set[str]) -> None:
                 f"rule references unknown field {ref.code!r}; "
                 f"known fields: {sorted(known_field_codes)}"
             )
+
+
+# --- codegen ---
+
+import json as _json
+from dataclasses import dataclass as _dataclass, field as _field
+
+
+@_dataclass(frozen=True)
+class CompiledRules:
+    """Output of compile_rules — feeds into emit.py."""
+    custom_rules_js: str
+    include_list: list[dict]   # e.g. [{"js_file": "awdForm.js"}]
+    rule_summary: list[dict]   # for manifest
+
+
+_RULE_KINDS_AND_ATTRS = (
+    ("visible_when",  "visible_when"),
+    ("enabled_when",  "enabled_when"),
+    ("required_when", "required_when"),
+    ("default_when",  "default_when"),
+)
+
+
+def _render_literal_js(lit: Literal) -> str:
+    """Pydantic-style literal -> JS literal."""
+    v = lit.value
+    if v is None:
+        return "null"
+    if v is True:
+        return "true"
+    if v is False:
+        return "false"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    # string
+    return _json.dumps(v)  # handles escaping; produces double-quoted
+
+
+def _render_condition(node: object, varmap: dict[str, str]) -> str:
+    """AST -> JS expression string. varmap maps "STAT" -> "stat" (local var name)."""
+    if isinstance(node, FieldRef):
+        return varmap[node.code]
+    if isinstance(node, Literal):
+        return _render_literal_js(node)
+    if isinstance(node, Eq):
+        return f"{varmap[node.left.code]} === {_render_literal_js(node.right)}"
+    if isinstance(node, Neq):
+        return f"{varmap[node.left.code]} !== {_render_literal_js(node.right)}"
+    if isinstance(node, Lt):
+        return f"{varmap[node.left.code]} < {_render_literal_js(node.right)}"
+    if isinstance(node, Gt):
+        return f"{varmap[node.left.code]} > {_render_literal_js(node.right)}"
+    if isinstance(node, Le):
+        return f"{varmap[node.left.code]} <= {_render_literal_js(node.right)}"
+    if isinstance(node, Ge):
+        return f"{varmap[node.left.code]} >= {_render_literal_js(node.right)}"
+    if isinstance(node, In):
+        parts = " || ".join(
+            f"({varmap[node.left.code]} === {_render_literal_js(lit)})"
+            for lit in node.right
+        )
+        return f"({parts})"
+    if isinstance(node, NotIn):
+        parts = " && ".join(
+            f"({varmap[node.left.code]} !== {_render_literal_js(lit)})"
+            for lit in node.right
+        )
+        return f"({parts})"
+    if isinstance(node, And):
+        return f"({_render_condition(node.left, varmap)} && {_render_condition(node.right, varmap)})"
+    if isinstance(node, Or):
+        return f"({_render_condition(node.left, varmap)} || {_render_condition(node.right, varmap)})"
+    if isinstance(node, Not):
+        return f"!({_render_condition(node.inner, varmap)})"
+    if isinstance(node, Paren):
+        return f"({_render_condition(node.inner, varmap)})"
+    raise SpecValidationError(f"unsupported AST node: {type(node).__name__}")
+
+
+def _collect_rules(fields) -> list[tuple]:
+    """Return list of (field_code, kind, source, default_value) tuples in
+    declaration + kind order. Skips fields with no rules."""
+    out: list[tuple] = []
+    for f in fields:
+        for kind, attr in _RULE_KINDS_AND_ATTRS:
+            src = getattr(f, attr)
+            if src is None:
+                continue
+            dv = f.default_value if kind == "default_when" else None
+            out.append((f.code, kind, src, dv))
+    return out
+
+
+def _referenced_field_codes(rules: list[tuple]) -> list[str]:
+    """Unique field codes referenced in any rule, in first-seen order."""
+    seen: list[str] = []
+    for (_target, _kind, src, _dv) in rules:
+        ast = parse_rule_expr(src)
+        for ref in _walk_field_refs(ast):
+            if ref.code not in seen:
+                seen.append(ref.code)
+    return seen
+
+
+def compile_rules(fields) -> CompiledRules:
+    """Top-level: list[FieldSpec] -> CompiledRules.
+
+    Pure function. Same input -> byte-identical output (lets goldens work).
+    """
+    rules = _collect_rules(fields)
+    if not rules:
+        return CompiledRules(custom_rules_js="", include_list=[], rule_summary=[])
+
+    referenced_codes = _referenced_field_codes(rules)
+    varmap = {code: code.lower() for code in referenced_codes}
+
+    lines: list[str] = []
+    lines.append("(function(awdForm) {")
+    lines.append("  function applyAll() {")
+    for code in referenced_codes:
+        lines.append(f'    var {varmap[code]} = awdForm.getValue("{code}");')
+    lines.append("")
+
+    for (target, kind, src, default_val) in rules:
+        ast = parse_rule_expr(src)
+        cond = _render_condition(ast, varmap)
+        lines.append(f"    // {target} {kind} {src}")
+        # Wrap bare (non-parenthesised) conditions in parens so the JS ternary
+        # and && operator bind correctly at each call-site.
+        wrapped = cond if cond.startswith("(") else f"({cond})"
+        if kind == "visible_when":
+            lines.append(f'    awdForm[{wrapped} ? "show" : "hide"]("{target}");')
+        elif kind == "enabled_when":
+            lines.append(f'    awdForm[{wrapped} ? "enable" : "disable"]("{target}");')
+        elif kind == "required_when":
+            lines.append(f'    awdForm.setRequired("{target}", {cond});')
+        elif kind == "default_when":
+            lit = _render_literal_js(Literal(default_val))
+            lines.append(f'    if ({wrapped} && awdForm.isEmpty("{target}")) {{')
+            lines.append(f'      awdForm.setValue("{target}", {lit});')
+            lines.append("    }")
+        else:
+            raise SpecValidationError(f"unsupported rule kind: {kind}")
+        lines.append("")
+
+    lines.append("  }")
+    lines.append("")
+    lines.append('  awdForm.on("form-open", applyAll);')
+    for code in referenced_codes:
+        lines.append(f'  awdForm.on("field-change:{code}", applyAll);')
+    lines.append("})(window.awdForm);")
+    lines.append("")  # trailing newline
+
+    js = "\n".join(lines)
+
+    summary: list[dict] = []
+    for (target, kind, src, default_val) in rules:
+        entry = {"field_code": target, "kind": kind, "source": src}
+        if kind == "default_when":
+            entry["default_value"] = default_val
+        summary.append(entry)
+
+    return CompiledRules(
+        custom_rules_js=js,
+        include_list=[{"js_file": "awdForm.js"}],
+        rule_summary=summary,
+    )

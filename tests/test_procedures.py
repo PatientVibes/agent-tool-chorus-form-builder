@@ -176,3 +176,119 @@ def test_validate_rule_rejects_unknown_field():
     with pytest.raises(SpecValidationError) as exc:
         validate_rule(ast, known_field_codes={"STAT", "MEMO"})
     assert "XYZQ" in str(exc.value)
+
+
+# --- codegen ---
+
+from chorus_form_builder.procedures import CompiledRules, compile_rules
+from chorus_form_builder._types import DomainValue
+from chorus_form_builder.spec import DomainValueSpec, FieldSpec, FormMetaSpec, FormSpec
+
+
+def _field(code: str, control_type: str = "text", **kw) -> FieldSpec:
+    """Convenience FieldSpec builder for codegen tests."""
+    return FieldSpec(code=code, label=code, control_type=control_type, **kw)
+
+
+def test_compile_rules_no_rules_returns_empty():
+    fields = [_field("STAT", control_type="combobox", values=[DomainValueSpec(value="A", description="Active")])]
+    result = compile_rules(fields)
+    assert isinstance(result, CompiledRules)
+    assert result.custom_rules_js == ""
+    assert result.include_list == []
+    assert result.rule_summary == []
+
+
+def test_compile_rules_visible_when_eq():
+    fields = [
+        _field("STAT", control_type="combobox", values=[DomainValueSpec(value="R", description="Rejected")]),
+        _field("MEMO", length=60, visible_when='STAT == "R"'),
+    ]
+    js = compile_rules(fields).custom_rules_js
+    assert 'var stat = awdForm.getValue("STAT");' in js
+    assert '// MEMO visible_when STAT == "R"' in js
+    assert 'awdForm[(stat === "R") ? "show" : "hide"]("MEMO");' in js
+    assert 'awdForm.on("form-open", applyAll);' in js
+    assert 'awdForm.on("field-change:STAT", applyAll);' in js
+
+
+def test_compile_rules_required_when_uses_set_required():
+    fields = [
+        _field("STAT", control_type="combobox", values=[DomainValueSpec(value="R", description="R")]),
+        _field("MEMO", length=60, required_when='STAT == "R"'),
+    ]
+    js = compile_rules(fields).custom_rules_js
+    assert 'awdForm.setRequired("MEMO", stat === "R");' in js
+
+
+def test_compile_rules_enabled_when_membership():
+    fields = [
+        _field("STAT", control_type="combobox", values=[DomainValueSpec(value="A", description="A")]),
+        _field("ACCT", length=10, enabled_when='STAT in ["A", "P"]'),
+    ]
+    js = compile_rules(fields).custom_rules_js
+    assert 'awdForm[((stat === "A") || (stat === "P")) ? "enable" : "disable"]("ACCT");' in js
+
+
+def test_compile_rules_default_when_guarded_by_is_empty():
+    fields = [
+        _field("STAT", control_type="combobox", values=[DomainValueSpec(value="A", description="A")]),
+        _field("BATC", length=6, default_when='STAT == "A"', default_value="BATCH-AUTO"),
+    ]
+    js = compile_rules(fields).custom_rules_js
+    assert 'if ((stat === "A") && awdForm.isEmpty("BATC")) {' in js
+    assert 'awdForm.setValue("BATC", "BATCH-AUTO");' in js
+
+
+def test_compile_rules_default_value_numeric_literal():
+    fields = [
+        _field("STAT", control_type="combobox", values=[DomainValueSpec(value="A", description="A")]),
+        _field("BATC", length=6, default_when='STAT == "A"', default_value=42),
+    ]
+    js = compile_rules(fields).custom_rules_js
+    assert 'awdForm.setValue("BATC", 42);' in js
+
+
+def test_compile_rules_event_subscriptions_for_each_referenced_field():
+    """field-change:<CODE> subscription emitted exactly once per distinct
+    referenced field, in declaration order."""
+    fields = [
+        _field("STAT", control_type="combobox", values=[DomainValueSpec(value="A", description="A")]),
+        _field("AMTV", length=10),
+        _field("MEMO", length=60, visible_when='STAT == "A"', enabled_when='AMTV > 100'),
+    ]
+    js = compile_rules(fields).custom_rules_js
+    assert js.count('awdForm.on("field-change:STAT", applyAll);') == 1
+    assert js.count('awdForm.on("field-change:AMTV", applyAll);') == 1
+
+
+def test_compile_rules_include_list_only_when_rules_present():
+    """No rules -> no jsFile in include_list. Rules present -> awdForm.js added."""
+    no_rules = compile_rules([_field("STAT", length=10)])
+    assert no_rules.include_list == []
+    with_rules = compile_rules([
+        _field("STAT", control_type="combobox", values=[DomainValueSpec(value="A", description="A")]),
+        _field("MEMO", length=60, visible_when='STAT == "A"'),
+    ])
+    assert with_rules.include_list == [{"js_file": "awdForm.js"}]
+
+
+def test_compile_rules_summary_records_each_rule():
+    """rule_summary mirrors the manifest's `rules` array."""
+    fields = [
+        _field("STAT", control_type="combobox", values=[DomainValueSpec(value="A", description="A")]),
+        _field("BATC", length=6, default_when='STAT == "A"', default_value="X"),
+    ]
+    summary = compile_rules(fields).rule_summary
+    assert {"field_code": "BATC", "kind": "default_when", "source": 'STAT == "A"', "default_value": "X"} in summary
+
+
+def test_compile_rules_deterministic():
+    """Identical inputs produce byte-identical JS output."""
+    fields = [
+        _field("STAT", control_type="combobox", values=[DomainValueSpec(value="A", description="A")]),
+        _field("MEMO", length=60, visible_when='STAT == "A"', required_when='STAT == "A"'),
+    ]
+    js1 = compile_rules(fields).custom_rules_js
+    js2 = compile_rules(fields).custom_rules_js
+    assert js1 == js2
