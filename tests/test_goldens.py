@@ -107,6 +107,10 @@ def _run_golden(name: str, tmp_path: Path) -> None:
         expected_csd.write_bytes(result.csd_path.read_bytes())
         expected_uxb.write_text(result.uxb_path.read_text(encoding="utf-8"), encoding="utf-8")
         expected_manifest.write_text(result.manifest_path.read_text(encoding="utf-8"), encoding="utf-8")
+        # Copy awdForm.js shim if present in output (rule-bearing forms only)
+        generated_shim = result.csd_path.parent / "awdForm.js"
+        if generated_shim.is_file():
+            (golden_dir / "awdForm.js").write_bytes(generated_shim.read_bytes())
         pytest.skip(f"REGENERATE_GOLDENS=1 — regenerated {name} golden files")
 
     assert expected_csd is not None, f"no committed .csd golden in {golden_dir}"
@@ -138,3 +142,17 @@ def test_golden_oracle_dcmb(tmp_path):
 def test_golden_text_plus_combo(tmp_path):
     pytest.importorskip("chorus_forms")
     _run_golden("text_plus_combo", tmp_path)
+
+
+def test_golden_with_rules(tmp_path):
+    pytest.importorskip("chorus_forms")
+    _run_golden("with_rules", tmp_path)
+
+    # Additionally: confirm the awdForm.js shim was emitted alongside the .csd
+    out_dir = tmp_path / "out"
+    assert (out_dir / "awdForm.js").is_file(), \
+        f"with_rules golden should ship awdForm.js next to the .csd; out_dir={list(out_dir.iterdir())}"
+    # And it should equal the committed shim
+    golden_shim = (Path(__file__).resolve().parent / "goldens" / "with_rules" / "awdForm.js")
+    assert golden_shim.is_file(), "with_rules golden dir is missing awdForm.js"
+    assert (out_dir / "awdForm.js").read_bytes() == golden_shim.read_bytes()
